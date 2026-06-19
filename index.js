@@ -1,15 +1,11 @@
 "use strict";
 
-// AI Chat Translator — Vendetta/Bunny plugin
-// Без сборки, без JSX, module.exports
-
 const { findByProps, findByDisplayName } = vendetta.metro;
 const { after } = vendetta.patcher;
 const { showToast } = vendetta.ui.toasts;
 const { showConfirmationAlert } = vendetta.ui.alerts;
 const storage = vendetta.plugin.storage;
 
-// Дефолты
 if (!storage.apiKey)    storage.apiKey    = "";
 if (!storage.model)     storage.model     = "gpt-4o-mini";
 if (!storage.sysPrompt) storage.sysPrompt =
@@ -22,7 +18,6 @@ let patches     = [];
 let chatHistory = [];
 let activeChan  = null;
 
-// ── Контекст чата ──────────────────────────────────────────────
 function getContext(channelId) {
     try {
         var MS = findByProps("getMessages");
@@ -39,33 +34,23 @@ function getContext(channelId) {
     } catch(e) { return ""; }
 }
 
-// ── Запрос к API ───────────────────────────────────────────────
 async function askAI(query, channelId) {
     if (!storage.apiKey) throw new Error("API ключ не задан — открой настройки плагина");
-
     var ctx = getContext(channelId);
-    var system = storage.sysPrompt +
-        (ctx ? "\n\n[Контекст чата]\n" + ctx + "\n[/Контекст]" : "");
-
+    var system = storage.sysPrompt + (ctx ? "\n\n[Контекст чата]\n" + ctx + "\n[/Контекст]" : "");
     var messages = [{ role: "system", content: system }];
     chatHistory.slice(-10).forEach(function(m) { messages.push(m); });
     messages.push({ role: "user", content: query });
-
     var res = await fetch("https://api.onlysq.ru/ai/openai/v1/chat/completions", {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + storage.apiKey
-        },
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + storage.apiKey },
         body: JSON.stringify({ model: storage.model, messages: messages, max_tokens: 1024 })
     });
-
     if (!res.ok) throw new Error("API " + res.status + ": " + await res.text());
     var data = await res.json();
     return ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "").trim() || "(пустой ответ)";
 }
 
-// ── Диалог ─────────────────────────────────────────────────────
 function openChat(channelId, prefill) {
     activeChan = channelId;
     var RNAlert = findByProps("prompt", "alert");
@@ -88,14 +73,14 @@ function openChat(channelId, prefill) {
                 content: buildHistory(),
                 confirmText: "Продолжить",
                 cancelText: "Закрыть",
-                onConfirm: function() { prompt(""); }
+                onConfirm: function() { doPrompt(""); }
             });
         } catch(e) {
             showToast("❌ " + e.message);
         }
     }
 
-    function prompt(defaultVal) {
+    function doPrompt(defaultVal) {
         if (RNAlert && RNAlert.prompt) {
             RNAlert.prompt(
                 "🤖 AI Chat",
@@ -110,101 +95,61 @@ function openChat(channelId, prefill) {
         } else {
             showConfirmationAlert({
                 title: "🤖 AI Chat",
-                content: buildHistory() || "Используй кнопку 🤖 в меню сообщения (долгое нажатие).",
+                content: "Зажми сообщение → 🤖 Спросить AI",
                 confirmText: "OK",
                 cancelText: "Закрыть"
             });
         }
     }
 
-    prompt(prefill || "");
+    doPrompt(prefill || "");
 }
 
-// ── Патч: кнопка 🤖 в панели ввода ────────────────────────────
-function patchInputBar() {
-    var React = findByProps("createElement", "useState");
-    var RN    = findByProps("TouchableOpacity", "Text");
-    if (!React || !RN) return;
-
-    var targets = [
-        "ChatInputBarButtons",
-        "ApplicationCommandsBar",
-        "ChatInput"
-    ];
-
-    for (var i = 0; i < targets.length; i++) {
-        var mod = findByDisplayName(targets[i]) ||
-                  (findByProps(targets[i]) && findByProps(targets[i])[targets[i]]);
-        if (!mod) continue;
-
-        (function(component) {
-            patches.push(after("default", component, function(args, ret) {
-                if (!ret || !ret.props) return ret;
-                var channelId = (args && args[0] && args[0].channelId) || activeChan;
-                if (!channelId) return ret;
-
-                var btn = React.createElement(
-                    RN.TouchableOpacity,
-                    {
-                        onPress: function() { openChat(channelId); },
-                        style: { marginHorizontal: 6, justifyContent: "center", alignItems: "center" }
-                    },
-                    React.createElement(RN.Text, { style: { fontSize: 22 } }, "🤖")
-                );
-
-                var ch = ret.props.children;
-                if (Array.isArray(ch)) {
-                    ch.unshift(btn);
-                } else {
-                    ret.props.children = ch ? [btn, ch] : btn;
-                }
-                return ret;
-            }));
-        })(mod);
-        break;
-    }
-}
-
-// ── Патч: пункт в меню сообщения ───────────────────────────────
 function patchMessageMenu() {
     var React = findByProps("createElement", "useState");
-    var Forms = findByProps("FormRow");
-    if (!React || !Forms) return;
+    var FormRow = findByProps("FormRow") && findByProps("FormRow").FormRow;
+    if (!React || !FormRow) return;
 
-    var LongPress = findByDisplayName("MessageLongPressActionSheet") ||
-                    (findByProps("MessageLongPressActionSheet") &&
-                     findByProps("MessageLongPressActionSheet").MessageLongPressActionSheet);
+    var LongPress = findByDisplayName("MessageLongPressActionSheet");
+    if (!LongPress) {
+        var lp = findByProps("MessageLongPressActionSheet");
+        if (lp) LongPress = lp.MessageLongPressActionSheet;
+    }
     if (!LongPress) return;
 
     patches.push(after("default", LongPress, function(args, ret) {
         if (!ret || !ret.props) return ret;
         var msg = args && args[0] && args[0].message;
         if (!msg) return ret;
-
-        var row = React.createElement(Forms.FormRow, {
+        var row = React.createElement(FormRow, {
             label: "🤖 Спросить AI",
             onPress: function() {
                 openChat(msg.channel_id, "Переведи или объясни: \"" + msg.content + "\"");
             }
         });
-
         var ch = ret.props.children;
         if (Array.isArray(ch)) ch.unshift(row);
         return ret;
     }));
 }
 
-// ── Настройки ──────────────────────────────────────────────────
 function Settings() {
-    var React        = findByProps("createElement", "useState");
-    var { useState } = React;
-    var Forms  = findByProps("FormSection", "FormRow", "FormInput");
-    var RN     = findByProps("ScrollView", "Text");
+    var React = findByProps("createElement", "useState");
+    var useState = React.useState;
+
+    // ищем каждый компонент отдельно
+    var ScrollView = findByProps("ScrollView") && findByProps("ScrollView").ScrollView;
+    var FormSection = findByProps("FormSection") && findByProps("FormSection").FormSection;
+    var FormRow = findByProps("FormRow") && findByProps("FormRow").FormRow;
+    var TextInput = findByProps("TextInput") && findByProps("TextInput").TextInput;
+    var Text = findByProps("Text") && findByProps("Text").Text;
+    var View = findByProps("View") && findByProps("View").View;
     var RNAlert = findByProps("prompt", "alert");
 
-    var [apiKey, setApiKey]   = useState(storage.apiKey || "");
-    var [model,  setModel]    = useState(storage.model  || "gpt-4o-mini");
-    var [sysp,   setSysp]     = useState(storage.sysPrompt || "");
+    var s = { apiKey: useState(storage.apiKey || ""), model: useState(storage.model || "gpt-4o-mini"), sysp: useState(storage.sysPrompt || "") };
+    var apiKey = s.apiKey[0]; var setApiKey = s.apiKey[1];
+    var model  = s.model[0];  var setModel  = s.model[1];
+    var sysp   = s.sysp[0];   var setSysp   = s.sysp[1];
 
     function save() {
         storage.apiKey    = apiKey;
@@ -227,64 +172,70 @@ function Settings() {
         try {
             var ans = await askAI("Ответь одним словом: работаешь?", null);
             showToast("✅ ИИ: " + ans);
-        } catch(e) {
-            showToast("❌ " + e.message);
-        }
+        } catch(e) { showToast("❌ " + e.message); }
     }
 
-    if (!Forms || !RN) {
-        return React.createElement(RN.Text, null, "Ошибка загрузки компонентов");
+    var R = React;
+    var inputStyle = { color: "#fff", backgroundColor: "#1e1f22", borderRadius: 8, padding: 10, marginVertical: 6, marginHorizontal: 16 };
+    var btnStyle   = { backgroundColor: "#5865f2", borderRadius: 8, padding: 12, marginVertical: 4, marginHorizontal: 16, alignItems: "center" };
+    var btnRed     = { backgroundColor: "#ed4245", borderRadius: 8, padding: 12, marginVertical: 4, marginHorizontal: 16, alignItems: "center" };
+    var labelStyle = { color: "#fff", fontWeight: "bold", fontSize: 15 };
+    var sectionStyle = { color: "#b5bac1", fontSize: 12, marginLeft: 16, marginTop: 16, marginBottom: 4, textTransform: "uppercase" };
+
+    if (!ScrollView || !Text || !TextInput || !View) {
+        // абсолютный fallback если ничего не нашлось
+        return R.createElement(Text || "Text", null, "Ошибка: компоненты не найдены");
     }
 
-    return React.createElement(RN.ScrollView, { style: { flex: 1 } },
+    return R.createElement(ScrollView, { style: { flex: 1 } },
 
-        React.createElement(Forms.FormSection, { title: "API" },
-            React.createElement(Forms.FormInput, {
-                title: "API Key (onlysq.ru)",
-                placeholder: "Вставь ключ...",
-                value: apiKey,
-                onChange: setApiKey,
-                secureTextEntry: true
-            }),
-            React.createElement(Forms.FormRow, {
-                label: "Модель",
-                subLabel: model,
-                trailing: Forms.FormRow.Arrow,
+        R.createElement(Text, { style: sectionStyle }, "API KEY"),
+        R.createElement(TextInput, {
+            style: inputStyle,
+            placeholder: "Вставь ключ от onlysq.ru...",
+            placeholderTextColor: "#888",
+            value: apiKey,
+            onChangeText: setApiKey,
+            secureTextEntry: true
+        }),
+
+        R.createElement(Text, { style: sectionStyle }, "МОДЕЛЬ: " + model),
+        R.createElement(View, { style: { marginHorizontal: 16, marginVertical: 4 } },
+            R.createElement(Text, {
+                style: { color: "#00b0f4", fontSize: 15, padding: 10 },
                 onPress: pickModel
-            })
+            }, "Нажми чтобы выбрать модель ›")
         ),
 
-        React.createElement(Forms.FormSection, { title: "Системный промпт" },
-            React.createElement(Forms.FormInput, {
-                title: "Промпт",
-                value: sysp,
-                onChange: setSysp,
-                multiline: true
-            })
+        R.createElement(Text, { style: sectionStyle }, "СИСТЕМНЫЙ ПРОМПТ"),
+        R.createElement(TextInput, {
+            style: Object.assign({}, inputStyle, { minHeight: 80 }),
+            placeholder: "Роль ИИ...",
+            placeholderTextColor: "#888",
+            value: sysp,
+            onChangeText: setSysp,
+            multiline: true
+        }),
+
+        R.createElement(Text, { style: sectionStyle }, "ДЕЙСТВИЯ"),
+
+        R.createElement(View, { style: btnStyle, onTouchEnd: save },
+            R.createElement(Text, { style: labelStyle }, "💾 Сохранить")
         ),
 
-        React.createElement(Forms.FormSection, { title: "Действия" },
-            React.createElement(Forms.FormRow, {
-                label: "💾 Сохранить",
-                onPress: save
-            }),
-            React.createElement(Forms.FormRow, {
-                label: "🧪 Тест API",
-                onPress: testApi
-            }),
-            React.createElement(Forms.FormRow, {
-                label: "🗑️ Очистить историю диалога",
-                onPress: function() { chatHistory = []; showToast("История очищена"); }
-            })
+        R.createElement(View, { style: btnStyle, onTouchEnd: testApi },
+            R.createElement(Text, { style: labelStyle }, "🧪 Тест API")
+        ),
+
+        R.createElement(View, { style: btnRed, onTouchEnd: function() { chatHistory = []; showToast("История очищена"); } },
+            R.createElement(Text, { style: labelStyle }, "🗑️ Очистить историю")
         )
     );
 }
 
-// ── Export ─────────────────────────────────────────────────────
 module.exports = {
     onLoad: function() {
-        try { patchInputBar(); }    catch(e) { console.error("[AIChat] patchInputBar:", e); }
-        try { patchMessageMenu(); } catch(e) { console.error("[AIChat] patchMessageMenu:", e); }
+        try { patchMessageMenu(); } catch(e) { console.error("[AIChat] patch:", e); }
     },
     onUnload: function() {
         patches.forEach(function(u) { try { u(); } catch(e) {} });
