@@ -1,10 +1,7 @@
-/// <reference types="vendetta-types" />
 "use strict";
 
-// ──────────────────────────────────────────────────────────────
-//  AI Chat Translator — Vendetta/Bunny plugin (no build needed)
-//  API: https://api.onlysq.ru/ai/openai  (OpenAI-совместимый)
-// ──────────────────────────────────────────────────────────────
+// AI Chat Translator — Vendetta/Bunny plugin
+// Без сборки, без JSX, module.exports
 
 const { findByProps, findByDisplayName } = vendetta.metro;
 const { after } = vendetta.patcher;
@@ -13,40 +10,36 @@ const { showConfirmationAlert } = vendetta.ui.alerts;
 const storage = vendetta.plugin.storage;
 
 // Дефолты
-if (!storage.apiKey)     storage.apiKey     = "";
-if (!storage.model)      storage.model      = "gpt-4o-mini";
-if (!storage.sysPrompt)  storage.sysPrompt  =
+if (!storage.apiKey)    storage.apiKey    = "";
+if (!storage.model)     storage.model     = "gpt-4o-mini";
+if (!storage.sysPrompt) storage.sysPrompt =
     "Ты переводчик и помощник. Тебе передаётся контекст последних сообщений Discord-чата. " +
-    "Используй его чтобы понимать тему. Отвечай кратко и точно на языке пользователя.";
+    "Используй его чтобы понимать тему. Отвечай кратко и точно.";
 
 const MODELS = ["gpt-4o-mini", "gemini-2.0-flash", "gemini-1.5-pro", "gpt-4o"];
 
-let patches      = [];
-let chatHistory  = [];          // история текущей сессии
-let activeChanId = null;
+let patches     = [];
+let chatHistory = [];
+let activeChan  = null;
 
-// ──────────────────────────────────────────────────────────────
-//  Утилита: последние N сообщений канала
-// ──────────────────────────────────────────────────────────────
-function getContext(channelId, limit) {
-    limit = limit || 10;
+// ── Контекст чата ──────────────────────────────────────────────
+function getContext(channelId) {
     try {
         var MS = findByProps("getMessages");
         var US = findByProps("getUser", "getCurrentUser");
         if (!MS || !channelId) return "";
         var msgs = MS.getMessages(channelId);
         if (!msgs) return "";
-        var arr = msgs._array || msgs.toArray?.() || [];
-        return arr.slice(-limit).map(function(m) {
-            var name = US?.getUser(m.author?.id)?.username || m.author?.username || "?";
+        var arr = msgs._array || (msgs.toArray ? msgs.toArray() : []);
+        return arr.slice(-10).map(function(m) {
+            var name = (US && US.getUser(m.author && m.author.id) || {}).username
+                    || (m.author && m.author.username) || "?";
             return name + ": " + m.content;
         }).filter(Boolean).join("\n");
     } catch(e) { return ""; }
 }
 
-// ──────────────────────────────────────────────────────────────
-//  Запрос к API
-// ──────────────────────────────────────────────────────────────
+// ── Запрос к API ───────────────────────────────────────────────
 async function askAI(query, channelId) {
     if (!storage.apiKey) throw new Error("API ключ не задан — открой настройки плагина");
 
@@ -55,8 +48,7 @@ async function askAI(query, channelId) {
         (ctx ? "\n\n[Контекст чата]\n" + ctx + "\n[/Контекст]" : "");
 
     var messages = [{ role: "system", content: system }];
-    // добавляем историю диалога (последние 6 пар)
-    chatHistory.slice(-12).forEach(function(m) { messages.push(m); });
+    chatHistory.slice(-10).forEach(function(m) { messages.push(m); });
     messages.push({ role: "user", content: query });
 
     var res = await fetch("https://api.onlysq.ru/ai/openai/v1/chat/completions", {
@@ -65,177 +57,169 @@ async function askAI(query, channelId) {
             "Content-Type": "application/json",
             "Authorization": "Bearer " + storage.apiKey
         },
-        body: JSON.stringify({
-            model: storage.model,
-            messages: messages,
-            max_tokens: 1024
-        })
+        body: JSON.stringify({ model: storage.model, messages: messages, max_tokens: 1024 })
     });
 
     if (!res.ok) throw new Error("API " + res.status + ": " + await res.text());
     var data = await res.json();
-    return (data.choices?.[0]?.message?.content || "").trim() || "(пустой ответ)";
+    return ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "").trim() || "(пустой ответ)";
 }
 
-// ──────────────────────────────────────────────────────────────
-//  Диалог: отправить → показать ответ → продолжить
-// ──────────────────────────────────────────────────────────────
+// ── Диалог ─────────────────────────────────────────────────────
 function openChat(channelId, prefill) {
-    activeChanId = channelId;
-    var RNAlert = findByProps("prompt");
+    activeChan = channelId;
+    var RNAlert = findByProps("prompt", "alert");
 
-    function prompt(defaultVal) {
-        var histStr = chatHistory.slice(-6).map(function(m) {
+    function buildHistory() {
+        return chatHistory.slice(-6).map(function(m) {
             return (m.role === "user" ? "👤 Ты" : "🤖 ИИ") + ": " + m.content;
         }).join("\n\n");
-
-        if (RNAlert?.prompt) {
-            // iOS / некоторые Android сборки
-            RNAlert.prompt(
-                "🤖 AI Chat",
-                histStr || "Введи запрос:",
-                [
-                    { text: "Закрыть", style: "cancel" },
-                    {
-                        text: "Отправить",
-                        onPress: function(input) {
-                            if (!input?.trim()) return;
-                            send(input.trim());
-                        }
-                    }
-                ],
-                "plain-text",
-                defaultVal || ""
-            );
-        } else {
-            // Fallback: showConfirmationAlert (без инпута — просто показывает историю)
-            showConfirmationAlert({
-                title: "🤖 AI Chat",
-                content: histStr || "Открой чат и используй /ai <запрос> или кнопку в меню сообщения.",
-                confirmText: "ОК",
-                cancelText: "Закрыть",
-            });
-        }
     }
 
     async function send(input) {
+        if (!input || !input.trim()) return;
         showToast("⏳ Думаю...");
         try {
-            var answer = await askAI(input, activeChanId);
-            chatHistory.push({ role: "user", content: input });
+            var answer = await askAI(input.trim(), activeChan);
+            chatHistory.push({ role: "user", content: input.trim() });
             chatHistory.push({ role: "assistant", content: answer });
-            // Показываем ответ и даём продолжить
             showConfirmationAlert({
                 title: "🤖 AI Chat",
-                content: chatHistory.slice(-6).map(function(m) {
-                    return (m.role === "user" ? "👤 Ты" : "🤖 ИИ") + ": " + m.content;
-                }).join("\n\n"),
+                content: buildHistory(),
                 confirmText: "Продолжить",
                 cancelText: "Закрыть",
-                onConfirm: function() { prompt(""); },
+                onConfirm: function() { prompt(""); }
             });
         } catch(e) {
             showToast("❌ " + e.message);
         }
     }
 
+    function prompt(defaultVal) {
+        if (RNAlert && RNAlert.prompt) {
+            RNAlert.prompt(
+                "🤖 AI Chat",
+                buildHistory() || "Введи запрос:",
+                [
+                    { text: "Закрыть", style: "cancel" },
+                    { text: "Отправить", onPress: function(v) { send(v); } }
+                ],
+                "plain-text",
+                defaultVal || ""
+            );
+        } else {
+            showConfirmationAlert({
+                title: "🤖 AI Chat",
+                content: buildHistory() || "Используй кнопку 🤖 в меню сообщения (долгое нажатие).",
+                confirmText: "OK",
+                cancelText: "Закрыть"
+            });
+        }
+    }
+
     prompt(prefill || "");
 }
 
-// ──────────────────────────────────────────────────────────────
-//  Патч: кнопка 🤖 в панели ввода сообщения
-// ──────────────────────────────────────────────────────────────
+// ── Патч: кнопка 🤖 в панели ввода ────────────────────────────
 function patchInputBar() {
-    var InputBar = findByDisplayName("ChatInputBarButtons") ||
-                   findByProps("ChatInputBarButtons")?.ChatInputBarButtons;
-    if (!InputBar) return;
+    var React = findByProps("createElement", "useState");
+    var RN    = findByProps("TouchableOpacity", "Text");
+    if (!React || !RN) return;
 
-    var React = findByProps("createElement");
-    var { TouchableOpacity, Text } = findByProps("TouchableOpacity") || {};
-    if (!React || !TouchableOpacity) return;
+    var targets = [
+        "ChatInputBarButtons",
+        "ApplicationCommandsBar",
+        "ChatInput"
+    ];
 
-    patches.push(after("default", InputBar, function(args, ret) {
-        var channelId = args?.[0]?.channelId;
-        if (!channelId || !ret) return ret;
+    for (var i = 0; i < targets.length; i++) {
+        var mod = findByDisplayName(targets[i]) ||
+                  (findByProps(targets[i]) && findByProps(targets[i])[targets[i]]);
+        if (!mod) continue;
 
-        var btn = React.createElement(
-            TouchableOpacity,
-            {
-                onPress: function() { openChat(channelId); },
-                style: { marginHorizontal: 4, justifyContent: "center", alignItems: "center" }
-            },
-            React.createElement(Text, { style: { fontSize: 22 } }, "🤖")
-        );
+        (function(component) {
+            patches.push(after("default", component, function(args, ret) {
+                if (!ret || !ret.props) return ret;
+                var channelId = (args && args[0] && args[0].channelId) || activeChan;
+                if (!channelId) return ret;
 
-        var children = ret.props?.children;
-        if (Array.isArray(children)) {
-            children.unshift(btn);
-        } else if (children) {
-            ret.props.children = [btn, children];
-        }
-        return ret;
-    }));
+                var btn = React.createElement(
+                    RN.TouchableOpacity,
+                    {
+                        onPress: function() { openChat(channelId); },
+                        style: { marginHorizontal: 6, justifyContent: "center", alignItems: "center" }
+                    },
+                    React.createElement(RN.Text, { style: { fontSize: 22 } }, "🤖")
+                );
+
+                var ch = ret.props.children;
+                if (Array.isArray(ch)) {
+                    ch.unshift(btn);
+                } else {
+                    ret.props.children = ch ? [btn, ch] : btn;
+                }
+                return ret;
+            }));
+        })(mod);
+        break;
+    }
 }
 
-// ──────────────────────────────────────────────────────────────
-//  Патч: пункт «🤖 Спросить AI» при долгом нажатии на сообщение
-// ──────────────────────────────────────────────────────────────
+// ── Патч: пункт в меню сообщения ───────────────────────────────
 function patchMessageMenu() {
+    var React = findByProps("createElement", "useState");
+    var Forms = findByProps("FormRow");
+    if (!React || !Forms) return;
+
     var LongPress = findByDisplayName("MessageLongPressActionSheet") ||
-                    findByProps("MessageLongPressActionSheet")?.MessageLongPressActionSheet;
+                    (findByProps("MessageLongPressActionSheet") &&
+                     findByProps("MessageLongPressActionSheet").MessageLongPressActionSheet);
     if (!LongPress) return;
 
-    var React = findByProps("createElement");
-    var { FormRow } = findByProps("FormRow") || {};
-    if (!React || !FormRow) return;
-
     patches.push(after("default", LongPress, function(args, ret) {
-        var msg = args?.[0]?.message;
-        if (!msg || !ret?.props) return ret;
+        if (!ret || !ret.props) return ret;
+        var msg = args && args[0] && args[0].message;
+        if (!msg) return ret;
 
-        var row = React.createElement(FormRow, {
+        var row = React.createElement(Forms.FormRow, {
             label: "🤖 Спросить AI",
             onPress: function() {
                 openChat(msg.channel_id, "Переведи или объясни: \"" + msg.content + "\"");
             }
         });
 
-        var children = ret.props.children;
-        if (Array.isArray(children)) children.unshift(row);
+        var ch = ret.props.children;
+        if (Array.isArray(ch)) ch.unshift(row);
         return ret;
     }));
 }
 
-// ──────────────────────────────────────────────────────────────
-//  Страница настроек
-// ──────────────────────────────────────────────────────────────
+// ── Настройки ──────────────────────────────────────────────────
 function Settings() {
     var React        = findByProps("createElement", "useState");
     var { useState } = React;
-    var { ScrollView, View, Text, TextInput, TouchableOpacity } =
-        findByProps("ScrollView", "TextInput") || {};
-    var { FormSection, FormInput, FormRow } = findByProps("FormSection", "FormRow") || {};
+    var Forms  = findByProps("FormSection", "FormRow", "FormInput");
+    var RN     = findByProps("ScrollView", "Text");
+    var RNAlert = findByProps("prompt", "alert");
 
-    var [apiKey, setApiKey]     = useState(storage.apiKey);
-    var [model, setModel]       = useState(storage.model);
-    var [prompt, setPrompt]     = useState(storage.sysPrompt);
-    var [saved, setSaved]       = useState(false);
+    var [apiKey, setApiKey]   = useState(storage.apiKey || "");
+    var [model,  setModel]    = useState(storage.model  || "gpt-4o-mini");
+    var [sysp,   setSysp]     = useState(storage.sysPrompt || "");
 
     function save() {
         storage.apiKey    = apiKey;
         storage.model     = model;
-        storage.sysPrompt = prompt;
-        setSaved(true);
+        storage.sysPrompt = sysp;
         showToast("✅ Сохранено");
-        setTimeout(function() { setSaved(false); }, 2000);
     }
 
     function pickModel() {
-        var RNAlert = findByProps("alert");
-        if (!RNAlert) return;
-        RNAlert.alert("Выбери модель", "", MODELS.map(function(m) {
-            return { text: m, onPress: function() { setModel(m); storage.model = m; } };
-        }).concat([{ text: "Отмена", style: "cancel" }]));
+        if (!RNAlert || !RNAlert.alert) return;
+        RNAlert.alert("Выбери модель", "",
+            MODELS.map(function(m) {
+                return { text: m, onPress: function() { setModel(m); storage.model = m; } };
+            }).concat([{ text: "Отмена", style: "cancel" }])
+        );
     }
 
     async function testApi() {
@@ -248,69 +232,63 @@ function Settings() {
         }
     }
 
-    return React.createElement(ScrollView, { style: { flex: 1 } },
+    if (!Forms || !RN) {
+        return React.createElement(RN.Text, null, "Ошибка загрузки компонентов");
+    }
 
-        React.createElement(FormSection, { title: "API настройки" },
+    return React.createElement(RN.ScrollView, { style: { flex: 1 } },
 
-            React.createElement(FormInput, {
-                title: "API Key",
-                placeholder: "Вставь ключ от onlysq.ru...",
+        React.createElement(Forms.FormSection, { title: "API" },
+            React.createElement(Forms.FormInput, {
+                title: "API Key (onlysq.ru)",
+                placeholder: "Вставь ключ...",
                 value: apiKey,
                 onChange: setApiKey,
-                secureTextEntry: true,
+                secureTextEntry: true
             }),
-
-            React.createElement(FormRow, {
-                label: "Модель: " + model,
-                trailing: "›",
-                onPress: pickModel,
+            React.createElement(Forms.FormRow, {
+                label: "Модель",
+                subLabel: model,
+                trailing: Forms.FormRow.Arrow,
+                onPress: pickModel
             })
         ),
 
-        React.createElement(FormSection, { title: "Системный промпт" },
-            React.createElement(FormInput, {
+        React.createElement(Forms.FormSection, { title: "Системный промпт" },
+            React.createElement(Forms.FormInput, {
                 title: "Промпт",
-                value: prompt,
-                onChange: setPrompt,
-                multiline: true,
+                value: sysp,
+                onChange: setSysp,
+                multiline: true
             })
         ),
 
-        React.createElement(FormSection, { title: "Действия" },
-
-            React.createElement(FormRow, {
-                label: saved ? "✅ Сохранено!" : "💾 Сохранить настройки",
-                onPress: save,
+        React.createElement(Forms.FormSection, { title: "Действия" },
+            React.createElement(Forms.FormRow, {
+                label: "💾 Сохранить",
+                onPress: save
             }),
-
-            React.createElement(FormRow, {
+            React.createElement(Forms.FormRow, {
                 label: "🧪 Тест API",
-                onPress: testApi,
+                onPress: testApi
             }),
-
-            React.createElement(FormRow, {
-                label: "🗑️ Очистить историю чата",
-                onPress: function() {
-                    chatHistory = [];
-                    showToast("История очищена");
-                },
+            React.createElement(Forms.FormRow, {
+                label: "🗑️ Очистить историю диалога",
+                onPress: function() { chatHistory = []; showToast("История очищена"); }
             })
         )
     );
 }
 
-// ──────────────────────────────────────────────────────────────
-//  Export
-// ──────────────────────────────────────────────────────────────
-export default {
+// ── Export ─────────────────────────────────────────────────────
+module.exports = {
     onLoad: function() {
-        patchInputBar();
-        patchMessageMenu();
+        try { patchInputBar(); }    catch(e) { console.error("[AIChat] patchInputBar:", e); }
+        try { patchMessageMenu(); } catch(e) { console.error("[AIChat] patchMessageMenu:", e); }
     },
     onUnload: function() {
         patches.forEach(function(u) { try { u(); } catch(e) {} });
         patches = [];
     },
-    settings: Settings,
+    settings: Settings
 };
-
