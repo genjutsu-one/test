@@ -1,1 +1,8 @@
-
+{
+  "id": "ai-chat-translator",
+  "name": "AI Chat",
+  "description": "Мини-чат с ИИ. Переводчик с контекстом последних 10 сообщений. GPT-4o / Gemini.",
+  "authors": [{ "name": "Sakura", "id": "715859176890433546" }],
+  "main": "index.js",
+  "hash": ""
+}
