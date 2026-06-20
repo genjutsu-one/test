@@ -64,26 +64,39 @@
     }
 
     async function askAI(query, channelId, history) {
-        if (!storage.apiKey) throw new Error("Укажите API ключ в настройках плагина");
-        
-        var ctx = getContext(channelId);
-        var system = storage.sysPrompt + (ctx ? "\n\n[Контекст чата]\n" + ctx + "\n[/Контекст]" : "");
-        
-        var messages = [{ role: "system", content: system }];
-        (history || []).slice(-20).forEach(function (m) { 
-            messages.push({ role: m.role, content: m.content }); 
-        });
-        messages.push({ role: "user", content: query });
+    if (!storage.apiKey) throw new Error("Укажите API ключ в настройках плагина");
+    
+    var ctx = getContext(channelId);
+    var system = storage.sysPrompt + (ctx ? "\n\n[Контекст чата]\n" + ctx + "\n[/Контекст]" : "");
+    
+    var messages = [{ role: "system", content: system }];
+    (history || []).slice(-20).forEach(function (m) { 
+        messages.push({ role: m.role, content: m.content }); 
+    });
+    messages.push({ role: "user", content: query });
 
-        var res = await fetch("https://api.onlysq.ru/ai/openai/v1/chat/completions", {
-            method: "POST",
-            headers: { 
-                "Content-Type": "application/json", 
-                "Authorization": "Bearer " + storage.apiKey 
-            },
-            body: JSON.stringify({ model: storage.model, messages: messages, max_tokens: 1024 })
-        });
+    // ИСПРАВЛЕННЫЙ URL согласно документации
+    var res = await fetch("https://api.onlysq.ru/ai/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { 
+             "Content-Type": "application/json", 
+             "Authorization": "Bearer " + storage.apiKey 
+        },
+        body: JSON.stringify({ model: storage.model, messages: messages, max_tokens: 1024 })
+    });
 
+    if (!res.ok) {
+        var t = await res.text();
+        // Выведем больше информации об ошибке для отладки
+        throw new Error("API Error " + res.status + ": " + t);
+    }
+    
+    var data = await res.json();
+    var choice = data.choices && data.choices[0];
+    var content = choice && choice.message && choice.message.content;
+    return (content || "").trim() || "(пустой ответ)";
+    }
+    
         if (!res.ok) {
             var t = await res.text();
             throw new Error("API Error " + res.status);
