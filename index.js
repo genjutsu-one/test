@@ -1,164 +1,150 @@
 (function () {
     "use strict";
 
-    const { React, ReactNative } = vendetta.metro.common;
-    const { View, Text, Modal, Pressable, TextInput, ScrollView, Animated, PanResponder, Clipboard } = ReactNative;
-    const { findByName } = vendetta.metro;
-    const { after } = vendetta.patcher;
-    const { showToast } = vendetta.ui.toasts;
-    const { FormSection, FormInput, FormRow } = vendetta.ui.components.Forms;
+    var common = vendetta.metro.common;
+    var React = common.React;
+    var RN = common.ReactNative;
+    var { View, Text, Modal, Pressable, TextInput, ScrollView, Animated, PanResponder, Clipboard } = RN;
 
-    const storage = vendetta.plugin.storage;
+    var metro = vendetta.metro;
+    var findByProps = metro.findByProps;
+    var findByName = metro.findByName;
+
+    var patcher = vendetta.patcher;
+    var after = patcher.after;
+
+    var showToast = vendetta.ui.toasts.showToast;
+    var Forms = vendetta.ui.components.Forms;
+
+    var storage = vendetta.plugin.storage;
 
     // Дефолтные настройки
     if (!storage.apiKey) storage.apiKey = "";
     if (!storage.model) storage.model = "gpt-4o-mini";
-    if (!storage.sysPrompt) storage.sysPrompt = "Ты полезный помощник. Отвечай кратко, точно и по делу.";
+    if (!storage.sysPrompt) storage.sysPrompt = "Ты полезный помощник. Отвечай кратко и точно.";
+    if (!storage.btnPos) storage.btnPos = { x: -20, y: -100 };
 
     const MODELS = [
         { label: "GPT-4o Mini", value: "gpt-4o-mini" },
         { label: "GPT-4o", value: "gpt-4o" },
-        { label: "Gemini 3.5 Flash", value: "gemini-3.5-flash" }
+        { label: "Gemini 2.0 Flash", value: "gemini-2.0-flash" }
     ];
 
-    let patches = [];
+    var patches = [];
 
+    // --- Логика ИИ ---
     async function askAI(query, history) {
-        if (!storage.apiKey?.trim()) throw new Error("API ключ не указан");
+        if (!storage.apiKey) throw new Error("Укажите API ключ в настройках");
 
-        const messages = [
-            { role: "system", content: storage.sysPrompt },
-            ...history.slice(-10),
-            { role: "user", content: query }
-        ];
+        var messages = [{ role: "system", content: storage.sysPrompt }];
+        (history || []).slice(-15).forEach(m => messages.push({ role: m.role, content: m.content }));
+        messages.push({ role: "user", content: query });
 
-        const response = await fetch("https://api.onlysq.ru/ai/openai/chat/completions", {
+        var res = await fetch("https://api.onlysq.ru/ai/openai/chat/completions", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${storage.apiKey.trim()}`
+            headers: { 
+                "Content-Type": "application/json", 
+                "Authorization": "Bearer " + storage.apiKey 
             },
-            body: JSON.stringify({
-                model: storage.model,
-                messages: messages,
+            body: JSON.stringify({ 
+                model: storage.model, 
+                messages: messages, 
                 max_tokens: 1000,
                 temperature: 0.7
             })
         });
 
-        if (!response.ok) {
-            const error = await response.text().catch(() => "Unknown error");
-            throw new Error(`API Error ${response.status}: ${error}`);
+        if (!res.ok) {
+            var errorText = await res.text().catch(() => "");
+            throw new Error(`API Error ${res.status}: ${errorText}`);
         }
-
-        const data = await response.json();
-        return data.choices?.[0]?.message?.content?.trim() || "Нет ответа от ИИ";
+        
+        var data = await res.json();
+        return data.choices?.[0]?.message?.content?.trim() || "(пустой ответ)";
     }
 
-    // ==================== МОДАЛЬНОЕ ОКНО ====================
+    // --- UI ---
+    const SparklesIcon = ({ color = "#fff", size = 24 }) => React.createElement(
+        RN.Image, 
+        { 
+            source: { uri: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23${color.replace('#','')}"><path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/></svg>` },
+            style: { width: size, height: size }
+        }
+    );
+
     function AIChatModal({ visible, onClose }) {
         const [input, setInput] = React.useState("");
         const [history, setHistory] = React.useState([]);
         const [loading, setLoading] = React.useState(false);
         const scrollRef = React.useRef(null);
 
-        const sendMessage = async () => {
-            const text = input.trim();
-            if (!text || loading) return;
+        async function send() {
+            const q = input.trim();
+            if (!q || loading) return;
 
-            const userMessage = { role: "user", content: text };
-            setHistory(prev => [...prev, userMessage]);
             setInput("");
             setLoading(true);
+            const newHistory = [...history, { role: "user", content: q }];
+            setHistory(newHistory);
 
             try {
-                const reply = await askAI(text, history);
-                setHistory(prev => [...prev, { role: "assistant", content: reply }]);
-            } catch (err) {
-                setHistory(prev => [...prev, { role: "assistant", content: `❌ ${err.message}` }]);
+                const answer = await askAI(q, newHistory);
+                setHistory(prev => [...prev, { role: "assistant", content: answer }]);
+            } catch (e) {
+                setHistory(prev => [...prev, { role: "assistant", content: "❌ " + e.message }]);
             } finally {
                 setLoading(false);
                 setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
             }
+        }
+
+        const s = {
+            overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.8)", justifyContent: "flex-end" },
+            sheet: { backgroundColor: "#1e1f22", borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "80%", padding: 16 },
+            header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+            title: { color: "#fff", fontSize: 20, fontWeight: "700" },
+            bubbleUser: { alignSelf: "flex-end", backgroundColor: "#5865f2", borderRadius: 18, padding: 12, maxWidth: "85%" },
+            bubbleAi: { alignSelf: "flex-start", backgroundColor: "#2b2d31", borderRadius: 18, padding: 12, maxWidth: "85%" },
+            text: { color: "#dbdee1", fontSize: 15.5, lineHeight: 22 },
+            inputArea: { flexDirection: "row", alignItems: "flex-end", marginTop: 12 },
+            input: { flex: 1, backgroundColor: "#2b2d31", borderRadius: 22, paddingHorizontal: 16, paddingVertical: 12, color: "#fff", marginRight: 10 },
+            sendBtn: { backgroundColor: "#5865f2", width: 48, height: 48, borderRadius: 24, justifyContent: "center", alignItems: "center" }
         };
 
-        return React.createElement(Modal, {
-            visible: visible,
-            transparent: true,
-            animationType: "slide",
-            onRequestClose: onClose
-        },
-            React.createElement(Pressable, {
-                style: { flex: 1, backgroundColor: "rgba(0,0,0,0.9)", justifyContent: "flex-end" },
-                onPress: onClose
-            },
-                React.createElement(Pressable, {
-                    style: {
-                        backgroundColor: "#1e1f22",
-                        borderTopLeftRadius: 24,
-                        borderTopRightRadius: 24,
-                        maxHeight: "80%",
-                        padding: 16
-                    },
-                    onPress: e => e.stopPropagation()
-                },
-                    React.createElement(Text, { style: { color: "#fff", fontSize: 20, fontWeight: "700", marginBottom: 12 } }, "✨ AI Assistant"),
-
-                    React.createElement(ScrollView, {
-                        ref: scrollRef,
-                        style: { flex: 1, marginBottom: 12 }
-                    },
-                        history.length === 0 
-                            ? React.createElement(Text, { style: { color: "#80848e", textAlign: "center", marginTop: 50 } }, "Напишите что-нибудь...")
-                            : history.map((msg, index) =>
-                                React.createElement(View, {
-                                    key: index,
-                                    style: {
-                                        alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
-                                        maxWidth: "85%",
-                                        backgroundColor: msg.role === "user" ? "#5865f2" : "#2b2d31",
-                                        padding: 12,
-                                        borderRadius: 18,
-                                        marginVertical: 6
-                                    }
-                                },
-                                    React.createElement(Text, { style: { color: "#fff" } }, msg.content)
-                                )
-                            ),
-                        loading && React.createElement(Text, { style: { color: "#fff", opacity: 0.7, marginVertical: 8 } }, "⏳ Думаю...")
+        return React.createElement(Modal, { visible, transparent: true, animationType: "slide", onRequestClose: onClose },
+            React.createElement(Pressable, { style: s.overlay, onPress: onClose },
+                React.createElement(Pressable, { style: s.sheet, onPress: e => e.stopPropagation() },
+                    React.createElement(View, { style: s.header },
+                        React.createElement(Text, { style: s.title }, "✨ AI Assistant"),
+                        React.createElement(Pressable, { onPress: () => setHistory([]) },
+                            React.createElement(Text, { style: { color: "#ed4245" } }, "Очистить")
+                        )
                     ),
-
-                    React.createElement(View, { style: { flexDirection: "row" } },
-                        React.createElement(TextInput, {
-                            style: {
-                                flex: 1,
-                                backgroundColor: "#2b2d31",
-                                color: "#fff",
-                                borderRadius: 22,
-                                paddingHorizontal: 16,
-                                paddingVertical: 12,
-                                marginRight: 8,
-                                maxHeight: 120
+                    React.createElement(ScrollView, { ref: scrollRef, style: { flex: 1 } },
+                        history.map((m, i) => 
+                            React.createElement(View, { 
+                                key: i, 
+                                style: [m.role === "user" ? s.bubbleUser : s.bubbleAi, { marginVertical: 6 }] 
                             },
+                                React.createElement(Text, { style: s.text }, m.content)
+                            )
+                        ),
+                        loading && React.createElement(View, { style: s.bubbleAi },
+                            React.createElement(Text, { style: s.text }, "⏳ Думаю...")
+                        )
+                    ),
+                    React.createElement(View, { style: s.inputArea },
+                        React.createElement(TextInput, {
+                            style: s.input,
                             placeholder: "Сообщение...",
                             placeholderTextColor: "#72767d",
                             value: input,
                             onChangeText: setInput,
                             multiline: true,
-                            onSubmitEditing: sendMessage
+                            onSubmitEditing: send
                         }),
-                        React.createElement(Pressable, {
-                            style: {
-                                backgroundColor: "#5865f2",
-                                width: 52,
-                                height: 52,
-                                borderRadius: 26,
-                                justifyContent: "center",
-                                alignItems: "center"
-                            },
-                            onPress: sendMessage
-                        },
-                            React.createElement(Text, { style: { color: "#fff", fontSize: 24 } }, "↑")
+                        React.createElement(Pressable, { style: s.sendBtn, onPress: send },
+                            React.createElement(Text, { style: { color: "#fff", fontSize: 22 } }, "↑")
                         )
                     )
                 )
@@ -166,144 +152,102 @@
         );
     }
 
-    // Плавающая кнопка
     function DraggableAIButton() {
         const [visible, setVisible] = React.useState(false);
-        const pan = React.useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+        const pan = React.useRef(new Animated.ValueXY(storage.btnPos)).current;
 
         const panResponder = React.useMemo(() => PanResponder.create({
             onStartShouldSetPanResponder: () => true,
             onPanResponderMove: Animated.event([null, { dx: pan.x, dy: pan.y }], { useNativeDriver: false }),
-            onPanResponderRelease: () => pan.flattenOffset()
-        }), []);
+            onPanResponderRelease: () => {
+                pan.flattenOffset();
+                storage.btnPos = { x: pan.x._value, y: pan.y._value };
+            }
+        }), [pan]);
 
-        return React.createElement(View, { style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 } },
-            React.createElement(Animated.View, {
-                ...panResponder.panHandlers,
-                style: {
-                    position: "absolute",
-                    right: 20,
-                    bottom: 100,
-                    width: 60,
-                    height: 60,
-                    borderRadius: 30,
-                    backgroundColor: "#5865f2",
-                    justifyContent: "center",
-                    alignItems: "center"
-                }
-            },
+        return React.createElement(View, { pointerEvents: "box-none", style: { position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: 9999 } },
+            React.createElement(Animated.View, { ...panResponder.panHandlers, style: {
+                position: 'absolute', right: 20, bottom: 100, width: 56, height: 56,
+                borderRadius: 28, backgroundColor: '#5865f2', justifyContent: 'center', alignItems: 'center',
+                transform: [{ translateX: pan.x }, { translateY: pan.y }]
+            }},
                 React.createElement(Pressable, { onPress: () => setVisible(true) },
-                    React.createElement(Text, { style: { fontSize: 28 } }, "✨")
+                    React.createElement(SparklesIcon, { size: 28, color: "#fff" })
                 )
             ),
             React.createElement(AIChatModal, { visible, onClose: () => setVisible(false) })
         );
     }
 
-    // Патч
-    function onLoad() {
+    function patchChatBar() {
         try {
-            const ChatInput = findByName("ChatInputGuardWrapper", false);
-            if (ChatInput) {
-                patches.push(after("default", ChatInput, (_, ret) => {
-                    if (ret?.props?.children) {
-                        const children = Array.isArray(ret.props.children) ? ret.props.children : [ret.props.children];
-                        children.push(React.createElement(DraggableAIButton));
-                        ret.props.children = children;
-                    }
-                    return ret;
-                }));
-                showToast("AI Assistant загружен");
-            }
-        } catch (e) {
-            showToast("Ошибка загрузки AI");
-        }
+            var ChatInputGuardWrapper = findByName("ChatInputGuardWrapper", false);
+            if (!ChatInputGuardWrapper) return false;
+
+            patches.push(after("default", ChatInputGuardWrapper, function (args, ret) {
+                if (!ret || !ret.props) return ret;
+                let children = ret.props.children;
+                if (!Array.isArray(children)) children = [children];
+                children.push(React.createElement(DraggableAIButton, { key: "ai-btn" }));
+                ret.props.children = children;
+                return ret;
+            }));
+            return true;
+        } catch (e) { return false; }
     }
 
-    function onUnload() {
-        patches.forEach(p => { try { p(); } catch {} });
-    }
-
-    // ==================== НАСТРОЙКИ ====================
     function Settings() {
         const [apiKey, setApiKey] = React.useState(storage.apiKey || "");
         const [model, setModel] = React.useState(storage.model || "gpt-4o-mini");
-        const [sysPrompt, setSysPrompt] = React.useState(storage.sysPrompt || "");
-        const [showModelModal, setShowModelModal] = React.useState(false);
+        const [sysp, setSysp] = React.useState(storage.sysPrompt || "");
+        const [modalVisible, setModalVisible] = React.useState(false);
 
-        const saveSettings = () => {
+        const save = () => {
             storage.apiKey = apiKey;
             storage.model = model;
-            storage.sysPrompt = sysPrompt;
+            storage.sysPrompt = sysp;
             showToast("✅ Настройки сохранены");
         };
 
-        return React.createElement(ScrollView, { style: { flex: 1, padding: 16 } },
-            React.createElement(FormSection, { title: "API" },
-                React.createElement(FormInput, {
+        return React.createElement(ScrollView, null,
+            React.createElement(Forms.FormSection, { title: "API" },
+                React.createElement(Forms.FormInput, {
                     title: "API Key",
                     placeholder: "sk-...",
                     value: apiKey,
                     onChange: setApiKey,
                     secureTextEntry: true
                 }),
-                React.createElement(FormRow, {
+                React.createElement(Forms.FormRow, {
                     label: "Модель",
                     subLabel: MODELS.find(m => m.value === model)?.label || model,
-                    trailing: FormRow.Arrow,
-                    onPress: () => setShowModelModal(true)
+                    trailing: Forms.FormRow.Arrow,
+                    onPress: () => setModalVisible(true)
                 })
             ),
-            React.createElement(FormSection, { title: "System Prompt" },
-                React.createElement(FormInput, {
-                    title: "Инструкция ИИ",
-                    value: sysPrompt,
-                    onChange: setSysPrompt,
+            React.createElement(Forms.FormSection, { title: "System Prompt" },
+                React.createElement(Forms.FormInput, {
+                    title: "Инструкция",
+                    value: sysp,
+                    onChange: setSysp,
                     multiline: true
                 })
             ),
-            React.createElement(FormRow, {
-                label: "💾 Сохранить настройки",
-                onPress: saveSettings
-            }),
-
-            // Модальное окно моделей
-            React.createElement(Modal, {
-                visible: showModelModal,
-                transparent: true,
-                animationType: "fade",
-                onRequestClose: () => setShowModelModal(false)
-            },
-                React.createElement(Pressable, {
-                    style: { flex: 1, backgroundColor: "rgba(0,0,0,0.85)", justifyContent: "center", alignItems: "center" },
-                    onPress: () => setShowModelModal(false)
-                },
-                    React.createElement(View, {
-                        style: { backgroundColor: "#2b2d31", borderRadius: 16, padding: 20, width: "80%" }
-                    },
-                        React.createElement(Text, { style: { color: "#fff", fontSize: 18, fontWeight: "700", marginBottom: 12 } }, "Выберите модель"),
-                        ...MODELS.map(m =>
-                            React.createElement(Pressable, {
-                                key: m.value,
-                                style: {
-                                    padding: 14,
-                                    backgroundColor: model === m.value ? "#4752c4" : "transparent",
-                                    borderRadius: 8,
-                                    marginBottom: 6
-                                },
-                                onPress: () => {
-                                    setModel(m.value);
-                                    setShowModelModal(false);
-                                }
-                            },
-                                React.createElement(Text, { style: { color: "#fff" } }, m.label)
-                            )
-                        )
-                    )
-                )
-            )
+            React.createElement(Forms.FormRow, { label: "💾 Сохранить", onPress: save })
         );
     }
 
+    function onLoad() {
+        if (patchChatBar()) {
+            showToast("✨ AI Assistant загружен");
+        } else {
+            showToast("⚠️ Не удалось загрузить кнопку");
+        }
+    }
+
+    function onUnload() {
+        patches.forEach(u => { try { u(); } catch(e){} });
+    }
+
     return { onLoad, onUnload, settings: Settings };
-})();
+})()
