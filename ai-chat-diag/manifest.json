@@ -1,0 +1,8 @@
+{
+  "id": "ai-chat-diagnostic",
+  "name": "AI Chat Diagnostic",
+  "description": "Временный плагин — показывает реальную структуру API для отладки",
+  "authors": [{ "name": "Sakura", "id": "715859176890433546" }],
+  "main": "index.js",
+  "hash": ""
+}
