@@ -80,7 +80,7 @@
         });
         messages.push({ role: "user", content: query });
 
-        const res = await fetch("https://api.onlysq.ru/v1/chat/completions", {
+        const res = await fetch("https://api.onlysq.ru/ai/openai/chat/completions", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
