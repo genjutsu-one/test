@@ -143,19 +143,27 @@
         var lastTranslatedId = React.useRef(null);
 
         async function autoTranslateLast() {
-            var channelId = getCurrentChannelId();
-            var recents = getRecentMessages(channelId, 10);
-            if (!recents.length) return;
-            var last = recents[recents.length - 1];
-            if (!last.content || !last.content.trim()) return;
-            if (lastTranslatedId.current === last.id) return; // не переводим повторно то же сообщение
-            lastTranslatedId.current = last.id;
-
-            setLoading(true);
-            var userMsg = { role: "user", content: "🔁 Авто-перевод последнего сообщения (" + last.author + "): \"" + last.content + "\"" };
-            setHistory([userMsg]);
-            setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
             try {
+                var channelId = getCurrentChannelId();
+                if (!channelId) { showToast("⚠️ AI Chat: канал не определён"); return; }
+
+                var recents = getRecentMessages(channelId, 10);
+                if (!recents.length) { showToast("⚠️ AI Chat: сообщения не найдены"); return; }
+
+                // ищем последнее сообщение с текстом (последнее может быть стикером/картинкой без текста)
+                var last = null;
+                for (var i = recents.length - 1; i >= 0; i--) {
+                    if (recents[i].content && recents[i].content.trim()) { last = recents[i]; break; }
+                }
+                if (!last) { showToast("⚠️ AI Chat: нет текстовых сообщений для перевода"); return; }
+                if (lastTranslatedId.current === last.id) return; // уже переводили это сообщение
+
+                lastTranslatedId.current = last.id;
+                setLoading(true);
+                var userMsg = { role: "user", content: "🔁 Авто-перевод (" + last.author + "): \"" + last.content + "\"" };
+                setHistory([userMsg]);
+                setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+
                 var answer = await askAI(
                     "Переведи это сообщение на русский (если оно не на русском) и, если нужно, кратко поясни смысл: \"" + last.content + "\"",
                     channelId,
@@ -163,7 +171,8 @@
                 );
                 setHistory(prev => prev.concat([{ role: "assistant", content: answer }]));
             } catch (e) {
-                console.error("[AIChat]", e);
+                console.error("[AIChat] autoTranslate error:", e);
+                showToast("❌ AI Chat: " + e.message);
                 setHistory(prev => prev.concat([{ role: "assistant", content: "❌ " + e.message }]));
             } finally {
                 setLoading(false);
@@ -204,13 +213,14 @@
         };
 
         const s = {
-            overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-end" },
+            overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "flex-start" },
             sheet: { 
                 backgroundColor: "#1e1f22", 
-                borderTopLeftRadius: 24, borderTopRightRadius: 24,
-                maxHeight: "80%", minHeight: 400, 
+                borderBottomLeftRadius: 24, borderBottomRightRadius: 24,
+                maxHeight: "65%", minHeight: 360, 
+                marginTop: 44,
                 paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20,
-                shadowColor: "#000", shadowOffset: {width:0,height:-4}, shadowOpacity: 0.3, shadowRadius: 10, elevation: 10
+                shadowColor: "#000", shadowOffset: {width:0,height:4}, shadowOpacity: 0.3, shadowRadius: 10, elevation: 10
             },
             header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
             title: { color: "#fff", fontSize: 18, fontWeight: "700", letterSpacing: 0.5 },
