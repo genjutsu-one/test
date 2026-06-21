@@ -45,20 +45,34 @@
     var patches = [];
 
     // === Логика ИИ ===
-    function getContext(channelId) {
+    function getRecentMessages(channelId, limit) {
         try {
             var MS = findByProps("getMessages");
             var US = findByProps("getUser", "getCurrentUser");
-            if (!MS || !channelId) return "";
+            if (!MS || !channelId) return [];
             var msgs = MS.getMessages(channelId);
-            if (!msgs) return "";
+            if (!msgs) return [];
             var arr = msgs._array || (msgs.toArray ? msgs.toArray() : []);
-            return arr.slice(-10).map(function (m) {
+            // сортируем по id (snowflake = хронологический порядок), т.к. порядок
+            // внутреннего массива стора не гарантирован "от старых к новым"
+            arr = arr.slice().sort(function (a, b) {
+                var ai = String(a.id), bi = String(b.id);
+                if (ai.length !== bi.length) return ai.length - bi.length;
+                return ai < bi ? -1 : (ai > bi ? 1 : 0);
+            });
+            return arr.slice(-(limit || 10)).map(function (m) {
                 var author = m.author || {};
                 var name = (US && US.getUser(author.id) || {}).username || author.username || "?";
-                return name + ": " + (m.content || "");
-            }).filter(Boolean).join("\n");
-        } catch (e) { return ""; }
+                return { id: m.id, author: name, content: m.content || "" };
+            });
+        } catch (e) { return []; }
+    }
+
+    function getContext(channelId) {
+        return getRecentMessages(channelId, 10)
+            .map(function (m) { return m.author + ": " + m.content; })
+            .filter(function (s) { return s.split(":").slice(1).join(":").trim().length > 0; })
+            .join("\n");
     }
 
     function getCurrentChannelId() {
@@ -126,6 +140,40 @@
         var loadingState = React.useState(false);
         var loading = loadingState[0], setLoading = loadingState[1];
         var scrollRef = React.useRef(null);
+        var lastTranslatedId = React.useRef(null);
+
+        async function autoTranslateLast() {
+            var channelId = getCurrentChannelId();
+            var recents = getRecentMessages(channelId, 10);
+            if (!recents.length) return;
+            var last = recents[recents.length - 1];
+            if (!last.content || !last.content.trim()) return;
+            if (lastTranslatedId.current === last.id) return; // не переводим повторно то же сообщение
+            lastTranslatedId.current = last.id;
+
+            setLoading(true);
+            var userMsg = { role: "user", content: "🔁 Авто-перевод последнего сообщения (" + last.author + "): \"" + last.content + "\"" };
+            setHistory([userMsg]);
+            setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+            try {
+                var answer = await askAI(
+                    "Переведи это сообщение на русский (если оно не на русском) и, если нужно, кратко поясни смысл: \"" + last.content + "\"",
+                    channelId,
+                    []
+                );
+                setHistory(prev => prev.concat([{ role: "assistant", content: answer }]));
+            } catch (e) {
+                console.error("[AIChat]", e);
+                setHistory(prev => prev.concat([{ role: "assistant", content: "❌ " + e.message }]));
+            } finally {
+                setLoading(false);
+                setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+            }
+        }
+
+        React.useEffect(() => {
+            if (visible) autoTranslateLast();
+        }, [visible]);
 
         async function send() {
             var q = (input || "").trim();
@@ -319,7 +367,7 @@
     // === Настройки ===
     function Settings() {
         const [apiKey, setApiKey] = React.useState(storage.apiKey || "");
-        const [model, setModel] = React.useState(storage.model || "gpt-4o-mini");
+        const [model, setModel] = React.useState(storage.model || "gemini-3.5-flash");
         const [sysp, setSysp] = React.useState(storage.sysPrompt || "");
         const [modalVisible, setModalVisible] = React.useState(false);
 
