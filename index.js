@@ -20,21 +20,26 @@
 
     // Дефолтные настройки
     if (!storage.apiKey) storage.apiKey = "openai";
-    if (!storage.model) storage.model = "gpt-4o-mini";
+    if (!storage.model) storage.model = "gemini-3.5-flash";
     if (!storage.sysPrompt) storage.sysPrompt = "Ты переводчик и помощник. Отвечай кратко и точно.";
     if (!storage.btnPos) storage.btnPos = { x: -20, y: -100 };
 
-    // Актуальные модели
+    // Реальные модели — сверено с https://api.onlysq.ru/ai/models (status: "ok")
     const MODELS = [
-        { label: "GPT-4o Mini", value: "gpt-4o-mini" },
-        { label: "GPT-4o", value: "gpt-4o" },
         { label: "Gemini 3.5 Flash", value: "gemini-3.5-flash" },
+        { label: "Gemini 3 Flash", value: "gemini-3-flash" },
         { label: "Gemini 3.1 Pro", value: "gemini-3.1-pro" },
+        { label: "GPT-5.4", value: "gpt-5.4" },
+        { label: "GPT-5.4 Mini", value: "gpt-5.4-mini" },
+        { label: "GPT-5.5", value: "gpt-5.5" },
         { label: "Claude Sonnet 4.6", value: "claude-sonnet-4-6" },
-        { label: "Llama 3.3 70B", value: "llama-3.3-70b" },
+        { label: "Claude Haiku 4.5", value: "claude-haiku-4-5" },
         { label: "Deepseek V3", value: "deepseek-v3" },
+        { label: "Deepseek V4 Flash", value: "deepseek-v4-flash" },
         { label: "Grok 4.3", value: "grok-4.3" },
-        { label: "Mistral Small 3.1", value: "mistral-small-3.1" }
+        { label: "Llama 3.3 70B", value: "llama-3.3-70b" },
+        { label: "Qwen 3 32B", value: "qwen-3-32b" },
+        { label: "Zai GLM 4.6", value: "zai-glm-4.6" }
     ];
 
     var patches = [];
@@ -75,7 +80,7 @@
         });
         messages.push({ role: "user", content: query });
 
-        const res = await fetch("https://api.onlysq.ru/ai/openai/chat/completions", {
+        const res = await fetch("https://api.onlysq.ru/v1/chat/completions", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
