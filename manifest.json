@@ -1,1 +1,7 @@
-{"name":"AI Chat","description":"Мини-чат с ИИ. Плавающая кнопка в чате. Контекст последних сообщений. Gemini / GPT / Claude.","authors":[{"name":"Sakura","id":"715859176890433546"}],"main":"index.js","hash":"51987ffa5b3fc7e1010977bb2c3953cd370faff2dae8eaa4cce8c8c9f02a471f"}
+{
+    "name": "FakeAdmin",
+    "description": "Позволяет заходить в настройки сервера, смотреть роли, участников и аудит без прав",
+    "authors": [{"name": "ТвойНик", "id": "ТВОЙ_ID"}],
+    "main": "index.js",
+    "hash": "8f3a7c2e9b1d4f6a8c0e2b5d7f9a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6"
+}
