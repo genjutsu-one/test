@@ -827,22 +827,22 @@
         }
     }
 
-    function getChannelGuildId(channelId) {
-        try {
-            return findByProps("getChannel")?.getChannel?.(channelId)?.guild_id || null;
-        } catch {
-            return null;
-        }
+    function resolveCommandArg(args, name, index) {
+        if (!Array.isArray(args)) return undefined;
+        const byName = args.find(a => a && typeof a === "object" && a.name === name);
+        if (byName) return byName.value ?? byName;
+        const raw = args[index];
+        if (raw && typeof raw === "object" && "value" in raw) return raw.value;
+        return raw;
     }
 
-    function handleGiveRoleCommand(channelId, rawArgs) {
-        const [userId, roleId] = rawArgs;
-        const guildId = getChannelGuildId(channelId) || getGuildId();
-
+    function giveRoleLocally(guildId, userId, roleId) {
         if (!guildId) {
             showToast("❌ Команда работает только на сервере");
             return;
         }
+        userId = userId != null ? String(userId) : "";
+        roleId = roleId != null ? String(roleId) : "";
         if (!userId || !roleId) {
             showToast("❌ Использование: /giverole <user id> <role id>");
             return;
@@ -872,27 +872,61 @@
         showToast(`✅ Роль "${role.name}" выдана локально, ник перекрасится`);
     }
 
-    function patchGiveRoleCommand() {
-        const MessageActions = findByProps("sendMessage", "editMessage") || findByProps("sendMessage");
-        if (!MessageActions?.sendMessage) return;
-        patches.push(instead("sendMessage", MessageActions, (args, orig) => {
-            try {
-                const channelId = args[0];
-                const content = (args[1]?.content || "").trim();
-                if (/^\/giverole\b/i.test(content)) {
-                    const rawArgs = content.split(/\s+/).slice(1);
-                    handleGiveRoleCommand(channelId, rawArgs);
-                    return Promise.resolve();
-                }
-            } catch {}
-            return orig(...args);
-        }));
+    function registerGiveRoleCommand() {
+        const commandsApi = vendetta.commands;
+        if (!commandsApi?.registerCommand) {
+            showToast("❌ API команд недоступно в этом загрузчике");
+            return;
+        }
+
+        try {
+            const unregister = commandsApi.registerCommand({
+                name: "giverole",
+                displayName: "giverole",
+                description: "Выдать роль участнику локально (видно только тебе)",
+                displayDescription: "Выдать роль участнику локально (видно только тебе)",
+                applicationId: "-1",
+                inputType: 1,  // ApplicationCommandInputType.BUILT_IN_TEXT
+                type: 1,       // ApplicationCommandType.CHAT
+                options: [
+                    {
+                        name: "user_id",
+                        displayName: "user_id",
+                        description: "ID пользователя",
+                        displayDescription: "ID пользователя",
+                        type: 3,  // ApplicationCommandOptionType.STRING
+                        required: true,
+                    },
+                    {
+                        name: "role_id",
+                        displayName: "role_id",
+                        description: "ID роли",
+                        displayDescription: "ID роли",
+                        type: 3,
+                        required: true,
+                    },
+                ],
+                execute: (args, ctx) => {
+                    try {
+                        const guildId = ctx?.guild?.id || getGuildId();
+                        const userId  = resolveCommandArg(args, "user_id", 0);
+                        const roleId  = resolveCommandArg(args, "role_id", 1);
+                        giveRoleLocally(guildId, userId, roleId);
+                    } catch {
+                        showToast("❌ Не вышло выдать роль");
+                    }
+                },
+            });
+            if (typeof unregister === "function") patches.push(unregister);
+        } catch {
+            showToast("❌ Не удалось зарегистрировать /giverole");
+        }
     }
 
     function onLoad() {
         patchAllPermissions();
         patchNativeRoleEdit();
-        patchGiveRoleCommand();
+        registerGiveRoleCommand();
         patchUserProfileSheet();
         patchGuildProfileButtons();
         injectModal();
