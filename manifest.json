@@ -3,5 +3,5 @@
     "description": "Полная фейковая админка: Server Settings UI, список участников, роли, баны, журнал аудита, кнопки модератора в профиле",
     "authors": [{"name": "ТвойНик", "id": "ТВОЙ_ID"}],
     "main": "index.js",
-    "hash": "2027b1cfe6997a3870b7d88bab2f37bc5bbb8f0e8c50bf3d0891577a5c1bed8d"
+    "hash": "c6e2af483758fa0f09ff596d9de715a0bd4858424336c0889e38e293783b270e"
 }
