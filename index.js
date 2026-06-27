@@ -616,15 +616,21 @@
             });
         }
 
+        // ─── Кэш клонов: один и тот же исходный объект всегда отдаёт ОДНУ И ТУ ЖЕ
+        //     подделанную ссылку. Без этого каждый вызов getSelfMember/getMember/
+        //     getGuild создавал НОВЫЙ объект -> React/Flux видел "новые" данные
+        //     на каждый ре-рендер -> бесконечный цикл ре-рендеров -> фриз всего
+        //     приложения. Пересчёт происходит только когда стор реально вернул
+        //     новую ссылку (т.е. данные действительно обновились).
+        const memberCloneCache = new WeakMap();
+        const guildCloneCache  = new WeakMap();
+
         // 5. getSelfMember — добавляем себе ID самой крутой РЕАЛЬНОЙ роли сервера.
-        //    Возвращаем НОВЫЙ объект (а не мутируем тот же), потому что часть UI
-        //    в Discord мемоизирует результат по ссылке (reselect-подобные стор-хуки) —
-        //    если просто менять поля у того же объекта, такие хуки могут не
-        //    пересчитаться и продолжат отдавать старые (урезанные) права.
         const MemberStore = findByProps("getSelfMember");
         if (MemberStore?.getSelfMember) {
             patches.push(after("getSelfMember", MemberStore, ([guildId], member) => {
                 if (!member) return member;
+                if (memberCloneCache.has(member)) return memberCloneCache.get(member);
                 try {
                     const topRoleId = getTopRealRoleId(guildId) || FAKE_OWNER_ROLE_ID;
                     const roles = Array.isArray(member.roles) ? member.roles : [];
@@ -633,28 +639,31 @@
                         roles: newRoles,
                         permissions: mergePerms(member.permissions),
                     });
+                    memberCloneCache.set(member, clone);
                     return clone;
                 } catch { return member; }
             }));
         }
 
-        // 5b. getMember(guildId, userId) — то же самое, но только когда спрашивают
-        //     про САМОГО СЕБЯ (чужие участники не трогаются, у них своя логика
-        //     fakeRoles через MembersScreen/RolePickerModal).
+        // 5b. getMember(guildId, userId) — то же самое, но только про САМОГО СЕБЯ
+        //     (чужие участники не трогаются — у них своя логика fakeRoles).
         const MemberStoreSingle = findByProps("getMember", "getMembers");
         if (MemberStoreSingle?.getMember) {
             patches.push(after("getMember", MemberStoreSingle, ([guildId, userId], member) => {
                 if (!member) return member;
+                const selfId = getSelfUserId();
+                if (userId !== selfId) return member;
+                if (memberCloneCache.has(member)) return memberCloneCache.get(member);
                 try {
-                    const selfId = getSelfUserId();
-                    if (userId !== selfId) return member;
                     const topRoleId = getTopRealRoleId(guildId) || FAKE_OWNER_ROLE_ID;
                     const roles = Array.isArray(member.roles) ? member.roles : [];
                     const newRoles = roles.includes(topRoleId) ? roles : [topRoleId, ...roles];
-                    return Object.assign(Object.create(Object.getPrototypeOf(member)), member, {
+                    const clone = Object.assign(Object.create(Object.getPrototypeOf(member)), member, {
                         roles: newRoles,
                         permissions: mergePerms(member.permissions),
                     });
+                    memberCloneCache.set(member, clone);
+                    return clone;
                 } catch { return member; }
             }));
         }
@@ -672,18 +681,20 @@
             }));
         }
 
-        // 6b. getGuild/getGuilds — спуфим ownerId на себя. Часть нативных проверок
-        //     (в т.ч., вероятно, гейт на саму иконку "Настройки" в шторке с
-        //     Бустами/Уведомлениями) сравнивает guild.ownerId === currentUser.id
-        //     напрямую, не вызывая никакой патчащейся функции isOwner().
+        // 6b. getGuild/getGuilds — спуфим ownerId на себя (кэшировано, см. выше).
+        //     ⚠️ Это самый "горячий" вызов в приложении — если после теста снова
+        //     будет фриз, первым делом закомментируй именно этот блок.
         const GuildStore = findByProps("getGuild", "getGuilds");
         if (GuildStore?.getGuild) {
             patches.push(after("getGuild", GuildStore, (_, guild) => {
                 if (!guild) return guild;
+                if (guildCloneCache.has(guild)) return guildCloneCache.get(guild);
                 try {
                     const selfId = getSelfUserId();
                     if (guild.ownerId === selfId) return guild;
-                    return Object.assign(Object.create(Object.getPrototypeOf(guild)), guild, { ownerId: selfId });
+                    const clone = Object.assign(Object.create(Object.getPrototypeOf(guild)), guild, { ownerId: selfId });
+                    guildCloneCache.set(guild, clone);
+                    return clone;
                 } catch { return guild; }
             }));
         }
