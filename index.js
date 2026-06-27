@@ -14,21 +14,21 @@
     let patches = [];
 
     // ─── Permission bits ───────────────────────────────────────────────────────
-    const ADMINISTRATOR   = 0x8n;
-    const MANAGE_GUILD    = 0x20n;
-    const MANAGE_CHANNELS = 0x10n;
-    const KICK_MEMBERS    = 0x2n;
-    const BAN_MEMBERS     = 0x4n;
-    const MANAGE_MESSAGES = 0x2000n;
-    const MANAGE_ROLES    = 0x10000000n;
-    const MANAGE_WEBHOOKS = 0x20000000n;
-    const MODERATE_MEMBERS = 0x400000000n;
-    const VIEW_AUDIT_LOG  = 0x80n;
+    const ADMINISTRATOR       = 0x8n;
+    const MANAGE_GUILD        = 0x20n;
+    const MANAGE_CHANNELS     = 0x10n;
+    const KICK_MEMBERS        = 0x2n;
+    const BAN_MEMBERS         = 0x4n;
+    const MANAGE_MESSAGES     = 0x2000n;
+    const MANAGE_ROLES        = 0x10000000n;
+    const MANAGE_WEBHOOKS     = 0x20000000n;
+    const MODERATE_MEMBERS    = 0x10000000000n; // исправлен дубликат
+    const VIEW_AUDIT_LOG      = 0x80n;
     const VIEW_GUILD_INSIGHTS = 0x80000n;
-    const MANAGE_NICKNAMES = 0x8000000n;
-    const MANAGE_EMOJIS   = 0x40000000n;
-    const MANAGE_EVENTS   = 0x200000000n;
-    const MANAGE_THREADS  = 0x400000000n;
+    const MANAGE_NICKNAMES    = 0x8000000n;
+    const MANAGE_EMOJIS       = 0x40000000n;
+    const MANAGE_EVENTS       = 0x200000000n;
+    const MANAGE_THREADS      = 0x400000000n;
 
     const ALL_ADMIN_PERMS = [
         ADMINISTRATOR, MANAGE_GUILD, MANAGE_CHANNELS, KICK_MEMBERS,
@@ -36,6 +36,20 @@
         MODERATE_MEMBERS, VIEW_AUDIT_LOG, VIEW_GUILD_INSIGHTS,
         MANAGE_NICKNAMES, MANAGE_EMOJIS, MANAGE_EVENTS, MANAGE_THREADS,
     ];
+
+    const ALL_PERMS_BIGINT = ALL_ADMIN_PERMS.reduce((acc, p) => acc | p, 0n);
+
+    // Безопасное объединение — возвращает тот же тип что на входе
+    function mergePerms(original) {
+        try {
+            const combined = (BigInt(original || 0) | ALL_PERMS_BIGINT);
+            if (typeof original === "bigint") return combined;
+            if (typeof original === "string") return combined.toString();
+            // number — безопасно только если влезает; иначе строка
+            const asNum = Number(combined);
+            return Number.isSafeInteger(asNum) ? asNum : combined.toString();
+        } catch { return original; }
+    }
 
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -397,7 +411,7 @@
 
     function patchAllPermissions() {
 
-        // 1. PermissionStore.can / canWithPartialContext — основная проверка прав в Discord
+        // 1. PermissionStore.can / canWithPartialContext
         const PermissionStore = findByStoreName?.("PermissionStore") ||
                                 findByProps("can", "getGuildPermissions", "getChannelPermissions");
         if (PermissionStore) {
@@ -413,18 +427,22 @@
                 }
             });
 
-            // getGuildPermissions — возвращает bigint, патчим чтобы добавить все права
+            // getGuildPermissions — возвращаем в том же типе что пришло
             if (typeof PermissionStore.getGuildPermissions === "function") {
                 patches.push(after("getGuildPermissions", PermissionStore, (_, ret) => {
-                    try {
-                        const all = ALL_ADMIN_PERMS.reduce((acc, p) => acc | p, 0n);
-                        return (BigInt(ret || 0) | all).toString();
-                    } catch { return ret; }
+                    return mergePerms(ret);
+                }));
+            }
+
+            // getChannelPermissions — аналогично
+            if (typeof PermissionStore.getChannelPermissions === "function") {
+                patches.push(after("getChannelPermissions", PermissionStore, (_, ret) => {
+                    return mergePerms(ret);
                 }));
             }
         }
 
-        // 2. Утилиты canKick / canBan / canManageUser и т.д.
+        // 2. canKick / canBan / canManageUser и т.д.
         const PermUtils = findByProps("canManageUser", "canKick", "canBan") ||
                           findByProps("canKick", "canBan");
         if (PermUtils) {
@@ -435,7 +453,7 @@
             });
         }
 
-        // 3. Отдельный модуль canManageGuild / isOwner
+        // 3. canManageGuild / isOwner
         const GuildPerms = findByProps("canManageGuild", "isOwner") ||
                            findByProps("canManageGuild");
         if (GuildPerms) {
@@ -445,35 +463,54 @@
             });
         }
 
-        // 4. Computed permissions — проверки на уровне guild
+        // 4. Computed permissions
         const computed = findByProps("getGuildPermissions", "makeEveryonePermissions");
         if (computed) {
             ["makeEveryonePermissions","computePermissions"].forEach(fn => {
                 if (typeof computed[fn] === "function") {
-                    const all = ALL_ADMIN_PERMS.reduce((acc, p) => acc | p, 0n);
                     patches.push(instead(fn, computed, (args, orig) => {
-                        try { return (BigInt(orig(...args)||0) | all).toString(); }
-                        catch { return all.toString(); }
+                        try {
+                            const result = orig(...args);
+                            return mergePerms(result);
+                        } catch { return ALL_PERMS_BIGINT.toString(); }
                     }));
                 }
             });
         }
 
-        // 5. Роли самого пользователя — добавляем ADMINISTRATOR в computed permissions
+        // 5. getSelfMember — добавляем права в объект участника
         const MemberStore = findByProps("getSelfMember");
         if (MemberStore?.getSelfMember) {
             patches.push(after("getSelfMember", MemberStore, (_, member) => {
                 if (!member) return member;
                 try {
-                    const all = ALL_ADMIN_PERMS.reduce((acc, p) => acc | p, 0n);
-                    member.permissions = (BigInt(member.permissions||0) | all).toString();
+                    member.permissions = mergePerms(member.permissions);
                 } catch {}
                 return member;
             }));
         }
+
+        // 6. hasAny / hasPermission — прямой патч чтобы не падал на BigInt
+        const hasAnyMod = findByProps("hasAny", "hasPermission");
+        if (hasAnyMod) {
+            ["hasAny","hasPermission","has"].forEach(fn => {
+                if (typeof hasAnyMod[fn] === "function") {
+                    patches.push(instead(fn, hasAnyMod, ([perms, flag], orig) => {
+                        try {
+                            // Нормализуем оба аргумента в BigInt
+                            const p = BigInt(perms || 0);
+                            const f = BigInt(flag || 0);
+                            if (ALL_ADMIN_PERMS.some(ap => f === ap)) return true;
+                            return Boolean(p & f);
+                        } catch {}
+                        return orig(perms, flag);
+                    }));
+                }
+            });
+        }
     }
 
-    // ─── Patch UserProfileSheet (кнопки) ──────────────────────────────────────
+    // ─── Patch UserProfileSheet ────────────────────────────────────────────────
 
     function patchUserProfileSheet() {
         const mod = findByName("UserProfileSheet") ||
@@ -504,7 +541,6 @@
     // ─── Inject RootModal ──────────────────────────────────────────────────────
 
     function injectModal() {
-        // Пробуем найти корневой компонент приложения
         const candidates = [
             findByName("AppContainer"),
             findByProps("AppContainer")?.AppContainer,
@@ -531,10 +567,9 @@
         }
     }
 
-    // ─── Patch Settings кнопки сервера — добавить пункт "Фейк Settings" ───────
+    // ─── Patch ServerActionSheet ───────────────────────────────────────────────
 
     function patchServerActionSheet() {
-        // Ищем action sheet который появляется при тапе на название сервера
         const candidates = [
             findByName("GuildContextMenu"),
             findByProps("GuildContextMenu")?.GuildContextMenu,
