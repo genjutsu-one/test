@@ -1,7 +1,7 @@
 {
-    "name": "FakeAdmin",
-    "description": "Открывает настройки сервера, роли, участников, аудит и т.д. без прав",
+    "name": "FakeAdminPanel",
+    "description": "Полная фейковая админка: Server Settings UI, список участников, роли, баны, журнал аудита, кнопки модератора в профиле",
     "authors": [{"name": "ТвойНик", "id": "ТВОЙ_ID"}],
     "main": "index.js",
-    "hash": "b2985de6eb144028363f6d6dcd2bddc5c413dbe4d58768c737a86a220202d84a"
+    "hash": "29c49ce267d479bd93cfa31368e9c062f7d02933fc1c3fabf25956ff3f14bdbe"
 }
