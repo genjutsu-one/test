@@ -130,8 +130,10 @@
         warnBox:       { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginTop: 10, backgroundColor: "#2b2d31", borderRadius: 6, padding: 10 },
         warnText:      { color: "#faa61a", fontSize: 12, flex: 1, marginLeft: 6 },
         lockBox:       { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
-        gearBtn:       { width: 44, height: 44, borderRadius: 22, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center", marginRight: 12 },
-        gearBtnText:   { fontSize: 22 },
+        // Круглая кнопка в стиле нативных Discord кнопок (Бусты / Уведомления)
+        nativeBtn:     { alignItems: "center", marginHorizontal: 12 },
+        nativeBtnCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: "#2b2d31", alignItems: "center", justifyContent: "center" },
+        nativeBtnLabel: { color: "#dbdee1", fontSize: 12, marginTop: 6 },
     };
 
     // ─── Header ────────────────────────────────────────────────────────────────
@@ -317,7 +319,7 @@
         );
     }
 
-    // ─── Main FakeServerSettings ───────────────────────────────────────────────
+    // ─── FakeServerSettings ────────────────────────────────────────────────────
 
     function FakeServerSettings({ guildId, onClose }) {
         const [screen, setScreen] = React.useState(null);
@@ -360,9 +362,9 @@
                 ),
                 React.createElement(RN.View, { style: S.section }, React.createElement(RN.Text, { style: S.sectionLabel }, "Настройки")),
                 React.createElement(RN.View, { style: S.card },
-                    React.createElement(Row, { icon:"ℹ️",  label:"Обзор",          onPress: () => setScreen("overview") }),
+                    React.createElement(Row, { icon:"ℹ️",  label:"Обзор",         onPress: () => setScreen("overview") }),
                     React.createElement(Row, { icon:"🛡️", label:"Модерация" }),
-                    React.createElement(Row, { icon:"📋", label:"Журнал аудита",  onPress: () => setScreen("audit") }),
+                    React.createElement(Row, { icon:"📋", label:"Журнал аудита", onPress: () => setScreen("audit") }),
                     React.createElement(Row, { icon:"📁", label:"Каналы" }),
                     React.createElement(Row, { icon:"🔗", label:"Интеграции" }),
                     React.createElement(Row, { icon:"😀", label:"Emoji" }),
@@ -392,12 +394,10 @@
     function RootModal() {
         const [visible, setVisible] = React.useState(false);
         const [guildId, setGuildId] = React.useState(null);
-
         React.useEffect(() => {
             modalState.show = (gid) => { setGuildId(gid); setVisible(true); };
             return () => { modalState.show = null; };
         }, []);
-
         if (!visible) return null;
         return React.createElement(RN.Modal, {
             visible: true,
@@ -407,32 +407,28 @@
         }, React.createElement(FakeServerSettings, { guildId, onClose: () => setVisible(false) }));
     }
 
-    // ─── Floating Gear Button ──────────────────────────────────────────────────
-    // Всплывающая шестерёнка поверх профиля сервера — резервный способ открыть панель
+    // ─── Нативная круглая кнопка "Настройки" в стиле Discord ─────────────────
+    // Рендерится так же как кнопки Бусты/Уведомления/Пригласить
 
-    function FloatingGear({ guildId }) {
+    function NativeSettingsButton({ guildId }) {
         return React.createElement(RN.TouchableOpacity, {
-            style: {
-                position: "absolute", bottom: 24, right: 24, zIndex: 9999,
-                width: 52, height: 52, borderRadius: 26,
-                backgroundColor: "#5865f2",
-                alignItems: "center", justifyContent: "center",
-                shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width:0, height:4 },
-                elevation: 10,
-            },
+            style: S.nativeBtn,
             onPress: () => {
                 if (modalState.show) modalState.show(guildId || getGuildId());
                 else showToast("❌ Модал не готов, перезагрузи Discord");
             },
-            activeOpacity: 0.8,
-        }, React.createElement(RN.Text, { style: { fontSize: 24 } }, "⚙️"));
+            activeOpacity: 0.7,
+        },
+            React.createElement(RN.View, { style: S.nativeBtnCircle },
+                React.createElement(RN.Text, { style: { fontSize: 26 } }, "⚙️")
+            ),
+            React.createElement(RN.Text, { style: S.nativeBtnLabel }, "Настройки")
+        );
     }
 
-    // ─── PERMISSION PATCHES ────────────────────────────────────────────────────
+    // ─── Permission patches ────────────────────────────────────────────────────
 
     function patchAllPermissions() {
-
-        // 1. PermissionStore
         const PermissionStore = findByStoreName?.("PermissionStore") ||
                                 findByProps("can", "getGuildPermissions", "getChannelPermissions");
         if (PermissionStore) {
@@ -447,17 +443,13 @@
                     }));
                 }
             });
-            if (typeof PermissionStore.getGuildPermissions === "function") {
+            if (typeof PermissionStore.getGuildPermissions === "function")
                 patches.push(after("getGuildPermissions", PermissionStore, (_, ret) => mergePerms(ret)));
-            }
-            if (typeof PermissionStore.getChannelPermissions === "function") {
+            if (typeof PermissionStore.getChannelPermissions === "function")
                 patches.push(after("getChannelPermissions", PermissionStore, (_, ret) => mergePerms(ret)));
-            }
         }
 
-        // 2. canKick / canBan / etc
-        const PermUtils = findByProps("canManageUser", "canKick", "canBan") ||
-                          findByProps("canKick", "canBan");
+        const PermUtils = findByProps("canManageUser", "canKick", "canBan") || findByProps("canKick", "canBan");
         if (PermUtils) {
             ["canManageUser","canKick","canBan","canTimeout","canManageChannel",
              "canManageGuild","canManageRoles","canManageMessages","canViewAuditLog"].forEach(fn => {
@@ -466,9 +458,7 @@
             });
         }
 
-        // 3. isOwner / isAdmin
-        const GuildPerms = findByProps("canManageGuild", "isOwner") ||
-                           findByProps("canManageGuild");
+        const GuildPerms = findByProps("canManageGuild", "isOwner") || findByProps("canManageGuild");
         if (GuildPerms) {
             ["canManageGuild","isOwner","isAdmin"].forEach(fn => {
                 if (typeof GuildPerms[fn] === "function")
@@ -476,7 +466,6 @@
             });
         }
 
-        // 4. computePermissions
         const computed = findByProps("getGuildPermissions", "makeEveryonePermissions");
         if (computed) {
             ["makeEveryonePermissions","computePermissions"].forEach(fn => {
@@ -489,7 +478,6 @@
             });
         }
 
-        // 5. getSelfMember
         const MemberStore = findByProps("getSelfMember");
         if (MemberStore?.getSelfMember) {
             patches.push(after("getSelfMember", MemberStore, (_, member) => {
@@ -499,7 +487,6 @@
             }));
         }
 
-        // 6. hasAny / hasPermission — патчим чтобы не падало на BigInt конвертации
         const hasAnyMod = findByProps("hasAny", "hasPermission");
         if (hasAnyMod) {
             ["hasAny","hasPermission","has"].forEach(fn => {
@@ -518,13 +505,9 @@
         }
     }
 
-    // ─── Patch UserProfileSheet (кнопки модератора) ────────────────────────────
-
     function patchUserProfileSheet() {
-        const mod = findByName("UserProfileSheet") ||
-                    findByProps("useUserProfileSheetActions");
+        const mod = findByName("UserProfileSheet") || findByProps("useUserProfileSheetActions");
         if (!mod) return;
-
         patches.push(after("default", mod, (args, ret) => {
             try {
                 let children = ret?.props?.children || [];
@@ -546,8 +529,6 @@
         }));
     }
 
-    // ─── Inject RootModal + FloatingGear ──────────────────────────────────────
-
     function injectModal() {
         const candidates = [
             findByName("AppContainer"),
@@ -555,7 +536,6 @@
             findByProps("ConnectedApp"),
             findByProps("DiscordApp"),
         ].filter(Boolean);
-
         for (const target of candidates) {
             const key = target.default ? "default" :
                         Object.keys(target).find(k => typeof target[k] === "function");
@@ -572,135 +552,142 @@
         }
     }
 
-    // ─── Patch ServerActionSheet — все варианты ────────────────────────────────
+    // ─── Главный патч: кнопка Настройки в шите сервера ────────────────────────
+    //
+    // Discord рендерит кнопки [Бусты, Пригласить, Уведомления, (Настройки если владелец)]
+    // через компонент GuildProfileSheet → внутри есть View с горизонтальным рядом кнопок.
+    // Мы патчим компоненты которые рендерят этот ряд и добавляем свою кнопку.
 
-    function patchServerActionSheet() {
+    function patchGuildProfileButtons() {
 
-        function makeGearItem(guildId) {
-            return {
-                label:  "⚙️  Фейк настройки сервера",
-                action: () => setTimeout(() => {
-                    if (modalState.show) modalState.show(guildId || getGuildId());
-                    else showToast("❌ Модал не готов, перезагрузи Discord");
-                }, 100),
-            };
+        function openSettings(guildId) {
+            setTimeout(() => {
+                if (modalState.show) modalState.show(guildId || getGuildId());
+                else showToast("❌ Модал не готов, перезагрузи Discord");
+            }, 80);
         }
 
-        function makeGearRow(guildId) {
-            return React.createElement(Forms.FormRow, {
-                key: "__fa_btn",
-                label: "⚙️  Фейк настройки сервера",
-                onPress: () => setTimeout(() => {
-                    if (modalState.show) modalState.show(guildId || getGuildId());
-                    else showToast("❌ Модал не готов, перезагрузи Discord");
-                }, 100),
-            });
-        }
-
-        // ── Вариант A: хук возвращает массив items ────────────────────────────
-        const hookCandidates = [
-            findByProps("useGuildContextMenuItems"),
-            findByProps("useServerContextMenuItems"),
-            findByProps("useGuildActionSheetItems"),
-        ].filter(Boolean);
-
-        for (const mod of hookCandidates) {
-            const hookName = ["useGuildContextMenuItems","useServerContextMenuItems","useGuildActionSheetItems"]
-                .find(k => typeof mod[k] === "function");
-            if (!hookName) continue;
+        // ── Способ 1: хук useGuildProfileSheetSections / useGuildHeaderActions ──
+        // Возвращает массив { label, icon, onPress } — точно такой же формат как нативные кнопки
+        const hookNames = [
+            "useGuildProfileSheetSections",
+            "useGuildProfileSheetActions",
+            "useGuildHeaderActions",
+            "useGuildHeaderButtons",
+            "useGuildContextMenuItems",
+            "useServerContextMenuItems",
+        ];
+        for (const hookName of hookNames) {
+            const mod = findByProps(hookName);
+            if (!mod || typeof mod[hookName] !== "function") continue;
             patches.push(after(hookName, mod, (args, ret) => {
                 try {
                     const guildId = args?.[0]?.guildId || args?.[0] || getGuildId();
-                    const item = makeGearItem(guildId);
-                    if (Array.isArray(ret)) return [...ret, item];
-                    if (Array.isArray(ret?.items)) { ret.items = [...ret.items, item]; return ret; }
-                } catch(e) { console.error("[FakeAdmin] hook patch:", e); }
+                    const btn = { label: "Настройки", icon: "⚙️", onPress: () => openSettings(guildId) };
+                    if (Array.isArray(ret)) return [...ret, btn];
+                    if (ret && typeof ret === "object") {
+                        // Ищем любой массив внутри объекта
+                        for (const k of Object.keys(ret)) {
+                            if (Array.isArray(ret[k])) { ret[k] = [...ret[k], btn]; break; }
+                        }
+                    }
+                } catch(e) { console.error("[FakeAdmin] hook:", hookName, e); }
                 return ret;
             }));
         }
 
-        // ── Вариант B: компонент с JSX children ───────────────────────────────
-        const componentCandidates = [
-            findByName("GuildContextMenu"),
-            findByProps("GuildContextMenu")?.GuildContextMenu,
-            findByName("ServerActionSheet"),
-            findByProps("ServerActionSheet")?.default,
-            findByName("NativeGuildContextMenu"),
-        ].filter(Boolean);
-
-        for (const target of componentCandidates) {
-            const key = typeof target === "function"
-                ? null
-                : (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
-            const patchTarget = key ? target : { __fn: target };
-            const patchKey    = key || "__fn";
-
-            patches.push(after(patchKey, patchTarget, (args, ret) => {
-                try {
-                    const guildId = args?.[0]?.guildId || getGuildId();
-                    const row = makeGearRow(guildId);
-                    const ch  = ret?.props?.children;
-                    if (Array.isArray(ch)) ch.push(row);
-                    else if (ret?.props) ret.props.children = [ch, row].filter(Boolean);
-                } catch(e) { console.error("[FakeAdmin] component patch:", e); }
-                return ret;
-            }));
-        }
-
-        // ── Вариант C: GuildHeader / GuildProfileSheet — добавляем кнопку-шестерёнку ──
-        // Это круглые кнопки рядом с "39 бустов" / "Пригласить" / "Уведомления"
-        const headerCandidates = [
+        // ── Способ 2: компонент GuildProfileSheet — патчим render, ищем ряд кнопок ──
+        // Кнопки рендерятся в горизонтальном ScrollView/View.
+        // Мы deep-walk по children и инжектим свою кнопку в тот же ряд.
+        const sheetCandidates = [
             findByName("GuildProfileSheet"),
             findByProps("GuildProfileSheet")?.GuildProfileSheet,
-            findByName("GuildHeader"),
-            findByProps("GuildHeader")?.default,
-            findByProps("useGuildHeaderButtons"),
+            findByProps("GuildProfileSheet")?.default,
         ].filter(Boolean);
 
-        for (const target of headerCandidates) {
-            // Патчим хук кнопок если есть
-            if (target?.useGuildHeaderButtons) {
-                patches.push(after("useGuildHeaderButtons", target, (args, ret) => {
-                    try {
-                        const guildId = args?.[0]?.guildId || getGuildId();
-                        const btn = {
-                            label: "Настройки",
-                            icon:  "⚙️",
-                            onPress: () => {
-                                if (modalState.show) modalState.show(guildId || getGuildId());
-                                else showToast("❌ Модал не готов");
-                            },
-                        };
-                        if (Array.isArray(ret)) return [btn, ...ret];
-                    } catch {}
-                    return ret;
-                }));
-                continue;
-            }
+        for (const target of sheetCandidates) {
+            const key = typeof target === "function" ? "__self" :
+                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
+            const pObj = key === "__self" ? { __self: target } : target;
+            const pKey = key === "__self" ? "__self" : key;
+            if (!pObj[pKey]) continue;
 
-            // Патчим render компонента
-            const key = typeof target === "function"
-                ? null
-                : (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
-            const patchTarget = key ? target : { __fn: target };
-            const patchKey    = key || "__fn";
-
-            patches.push(after(patchKey, patchTarget, (args, ret) => {
+            patches.push(after(pKey, pObj, (args, ret) => {
                 try {
                     const guildId = args?.[0]?.guildId || getGuildId();
-                    const gear = React.createElement(FloatingGear, { key: "__fa_gear", guildId });
-                    // Инжектим как floating overlay внутри sheet
-                    if (ret?.props) {
-                        const wrap = React.createElement(RN.View, { style: { flex:1 }, key: "__fa_wrap" },
-                            ret,
-                            gear
-                        );
-                        return wrap;
-                    }
-                } catch(e) { console.error("[FakeAdmin] header patch:", e); }
+                    // Ищем горизонтальный ряд кнопок рекурсивно и добавляем нашу
+                    injectIntoButtonRow(ret, guildId);
+                } catch(e) { console.error("[FakeAdmin] sheet patch:", e); }
                 return ret;
             }));
         }
+
+        // ── Способ 3: action sheet кнопки (FormRow в списке) ──────────────────
+        const actionSheetNames = [
+            "GuildContextMenu", "ServerActionSheet", "NativeGuildContextMenu",
+        ];
+        for (const name of actionSheetNames) {
+            const target = findByName(name) || findByProps(name)?.[name] || findByProps(name)?.default;
+            if (!target) continue;
+            const key = typeof target === "function" ? "__self" :
+                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
+            const pObj = key === "__self" ? { __self: target } : target;
+            const pKey = key === "__self" ? "__self" : key;
+            if (!pObj[pKey]) continue;
+
+            patches.push(after(pKey, pObj, (args, ret) => {
+                try {
+                    const guildId = args?.[0]?.guildId || getGuildId();
+                    const row = React.createElement(Forms.FormRow, {
+                        key: "__fa_settings_row",
+                        label: "⚙️  Фейк настройки сервера",
+                        onPress: () => openSettings(guildId),
+                    });
+                    const ch = ret?.props?.children;
+                    if (Array.isArray(ch)) ch.push(row);
+                    else if (ret?.props) ret.props.children = [ch, row].filter(Boolean);
+                } catch(e) { console.error("[FakeAdmin] action sheet:", name, e); }
+                return ret;
+            }));
+        }
+    }
+
+    // Рекурсивно ищем горизонтальный ряд с кнопками и добавляем нашу
+    function injectIntoButtonRow(element, guildId) {
+        if (!element || typeof element !== "object") return false;
+        const props = element.props;
+        if (!props) return false;
+
+        const children = props.children;
+        if (!children) return false;
+
+        const arr = Array.isArray(children) ? children : [children];
+
+        // Ряд кнопок: горизонтальный View/ScrollView содержащий 2-4 дочерних View с label "Бусты"/"Уведомления" и т.п.
+        // Эвристика: если массив из 2-5 элементов и стиль flexDirection:row — это наш ряд
+        if (arr.length >= 2 && arr.length <= 5) {
+            const style = props.style;
+            const isRow = style?.flexDirection === "row" ||
+                          (Array.isArray(style) && style.some(s => s?.flexDirection === "row"));
+            // Ещё одна эвристика: ищем элементы у которых есть дочерний Text с нужными словами
+            const hasBoosts = arr.some(el => JSON.stringify(el)?.includes("бусто") || JSON.stringify(el)?.includes("boost") || JSON.stringify(el)?.includes("Boost"));
+            const hasNotif  = arr.some(el => JSON.stringify(el)?.includes("ведомлени") || JSON.stringify(el)?.includes("Notif"));
+
+            if (isRow && (hasBoosts || hasNotif)) {
+                // Добавляем нашу кнопку если её ещё нет
+                if (!arr.some(el => el?.key === "__fa_settings_native")) {
+                    arr.push(React.createElement(NativeSettingsButton, { key: "__fa_settings_native", guildId }));
+                    props.children = arr;
+                }
+                return true;
+            }
+        }
+
+        // Рекурсия по дочерним элементам
+        for (const child of arr) {
+            if (injectIntoButtonRow(child, guildId)) return true;
+        }
+        return false;
     }
 
     // ─── Settings UI ───────────────────────────────────────────────────────────
@@ -708,12 +695,11 @@
     function Settings() {
         const [enabled, setEnabled] = React.useState(storage.enabled);
         const [toast,   setToast  ] = React.useState(storage.showFakeToast);
-
         return React.createElement(RN.ScrollView, null,
             React.createElement(Forms.FormSection, { title: "Fake Admin Panel" },
                 React.createElement(Forms.FormSwitch, {
                     label: "Включить плагин",
-                    subLabel: "Патчит ВСЕ проверки прав + добавляет кнопки",
+                    subLabel: "Патчит все проверки прав + добавляет кнопку Настройки",
                     value: enabled,
                     onValueChange: v => { setEnabled(v); storage.enabled = v; }
                 }),
@@ -723,23 +709,10 @@
                     onValueChange: v => { setToast(v); storage.showFakeToast = v; }
                 })
             ),
-            React.createElement(Forms.FormSection, { title: "Как это работает" },
-                React.createElement(Forms.FormRow, {
-                    label: "PermissionStore.can → всегда true",
-                    subLabel: "Для MANAGE_GUILD, BAN, KICK, ADMINISTRATOR и ещё 10 прав"
-                }),
-                React.createElement(Forms.FormRow, {
-                    label: "hasAny/hasPermission пропатчен",
-                    subLabel: "Фикс BigInt→Number краша при открытии профиля сервера"
-                }),
-                React.createElement(Forms.FormRow, {
-                    label: "Профиль пользователя",
-                    subLabel: "Кнопки Тайм-аут / Выгнать / Забанить добавлены визуально"
-                }),
-                React.createElement(Forms.FormRow, {
-                    label: "⚠️ API запросы всё равно вернут 403",
-                    subLabel: "Сервер Discord не даст реально кикнуть без прав"
-                })
+            React.createElement(Forms.FormSection, { title: "Статус" },
+                React.createElement(Forms.FormRow, { label: "Кнопка Настройки", subLabel: "Добавляется в ряд с Бусты/Уведомления" }),
+                React.createElement(Forms.FormRow, { label: "hasAny/hasPermission пропатчен", subLabel: "Фикс BigInt→Number краша" }),
+                React.createElement(Forms.FormRow, { label: "⚠️ API вернёт 403", subLabel: "Сервер Discord не даст реально управлять без прав" })
             )
         );
     }
@@ -750,9 +723,9 @@
         if (!storage.enabled) return;
         patchAllPermissions();
         patchUserProfileSheet();
-        patchServerActionSheet();
+        patchGuildProfileButtons();
         injectModal();
-        if (storage.showFakeToast) showToast("✅ FakeAdmin: все права пропатчены");
+        if (storage.showFakeToast) showToast("✅ FakeAdmin загружен");
     }
 
     function onUnload() {
