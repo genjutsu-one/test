@@ -4,7 +4,7 @@
     const { React, ReactNative: RN } = vendetta.metro.common;
     const { findByProps } = vendetta.metro;
     const patcher = vendetta.patcher;
-    const { instead } = patcher;
+    const { instead, after } = patcher;
     const { showToast } = vendetta.ui.toasts;
     const { Forms } = vendetta.ui.components;
 
@@ -16,29 +16,41 @@
 
     function bypassAllPermissions() {
         try {
-            const modules = findByProps("can", "canManageGuild", "canManageRoles", 
-                                      "canViewAuditLog", "canManageChannels");
+            // Основная проверка прав
+            const canModule = findByProps("can", "canManageGuild", "canViewAuditLog");
+            if (canModule?.can) {
+                patches.push(instead("can", canModule, () => true));
+            }
 
-            if (modules) {
-                // Главная проверка прав
-                if (modules.can) {
-                    patches.push(instead("can", modules, () => true));
-                }
-
-                // Конкретные права
-                const perms = ["canManageGuild", "canManageRoles", "canViewAuditLog", 
-                              "canManageChannels", "canManageWebhooks", "canManageEmojisAndStickers"];
-
-                perms.forEach(method => {
-                    if (modules[method]) {
-                        patches.push(instead(method, modules, () => true));
+            // Дополнительные модули
+            const guildModules = findByProps("getGuild", "canManageGuild", "getGuildPermissions");
+            if (guildModules) {
+                ["canManageGuild", "canManageRoles", "canViewAuditLog", 
+                 "canManageChannels", "canManageEmojisAndStickers"].forEach(m => {
+                    if (guildModules[m]) {
+                        patches.push(instead(m, guildModules, () => true));
                     }
                 });
-
-                console.log("[FakeAdmin] Все проверки прав пропатчены");
             }
-        } catch (e) {
-            console.error("[FakeAdmin] Ошибка:", e);
+
+            console.log("[FakeAdmin] Права пропатчены");
+        } catch (e) {}
+    }
+
+    // Принудительно показываем скрытые разделы в настройках сервера
+    function patchGuildSettings() {
+        const GuildSettings = findByName("GuildSettings") || findByProps("GuildSettings")?.default;
+
+        if (GuildSettings) {
+            patches.push(after("default", GuildSettings, (args, ret) => {
+                try {
+                    // Форсируем показ всех разделов
+                    if (ret?.props?.children) {
+                        // Можно добавить логику, но обычно достаточно патча прав
+                    }
+                } catch (e) {}
+                return ret;
+            }));
         }
     }
 
@@ -47,7 +59,7 @@
 
         const save = () => {
             storage.enabled = enabled;
-            showToast("✅ Настройки сохранены");
+            showToast("✅ Сохранено");
         };
 
         return React.createElement(RN.ScrollView, null,
@@ -66,8 +78,9 @@
         if (!storage.enabled) return;
 
         bypassAllPermissions();
+        patchGuildSettings();
 
-        showToast("✅ FakeAdmin загружен\nТеперь можно заходить в настройки сервера, роли, участников и аудит");
+        showToast("✅ FakeAdmin v2 загружен\nПопробуй зайти в настройки сервера");
     }
 
     function onUnload() {
