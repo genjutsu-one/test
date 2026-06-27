@@ -4,7 +4,7 @@
     const { React, ReactNative: RN } = vendetta.metro.common;
     const { findByProps } = vendetta.metro;
     const patcher = vendetta.patcher;
-    const { instead, after } = patcher;
+    const { instead } = patcher;
     const { showToast } = vendetta.ui.toasts;
     const { Forms } = vendetta.ui.components;
 
@@ -16,42 +16,21 @@
 
     function bypassAllPermissions() {
         try {
-            // Основная проверка прав
-            const canModule = findByProps("can", "canManageGuild", "canViewAuditLog");
-            if (canModule?.can) {
-                patches.push(instead("can", canModule, () => true));
-            }
+            const modules = findByProps("can", "canManageGuild", "canViewAuditLog");
 
-            // Дополнительные модули
-            const guildModules = findByProps("getGuild", "canManageGuild", "getGuildPermissions");
-            if (guildModules) {
-                ["canManageGuild", "canManageRoles", "canViewAuditLog", 
-                 "canManageChannels", "canManageEmojisAndStickers"].forEach(m => {
-                    if (guildModules[m]) {
-                        patches.push(instead(m, guildModules, () => true));
+            if (modules) {
+                if (modules.can) {
+                    patches.push(instead("can", modules, () => true));
+                }
+
+                const keys = ["canManageGuild", "canManageRoles", "canViewAuditLog", "canManageChannels"];
+                keys.forEach(key => {
+                    if (modules[key]) {
+                        patches.push(instead(key, modules, () => true));
                     }
                 });
             }
-
-            console.log("[FakeAdmin] Права пропатчены");
         } catch (e) {}
-    }
-
-    // Принудительно показываем скрытые разделы в настройках сервера
-    function patchGuildSettings() {
-        const GuildSettings = findByName("GuildSettings") || findByProps("GuildSettings")?.default;
-
-        if (GuildSettings) {
-            patches.push(after("default", GuildSettings, (args, ret) => {
-                try {
-                    // Форсируем показ всех разделов
-                    if (ret?.props?.children) {
-                        // Можно добавить логику, но обычно достаточно патча прав
-                    }
-                } catch (e) {}
-                return ret;
-            }));
-        }
     }
 
     function Settings() {
@@ -59,7 +38,7 @@
 
         const save = () => {
             storage.enabled = enabled;
-            showToast("✅ Сохранено");
+            showToast("✅ Настройки сохранены");
         };
 
         return React.createElement(RN.ScrollView, null,
@@ -78,9 +57,7 @@
         if (!storage.enabled) return;
 
         bypassAllPermissions();
-        patchGuildSettings();
-
-        showToast("✅ FakeAdmin v2 загружен\nПопробуй зайти в настройки сервера");
+        showToast("✅ FakeAdmin включён");
     }
 
     function onUnload() {
