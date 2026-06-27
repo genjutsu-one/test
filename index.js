@@ -576,8 +576,11 @@
         if (RoleStore?.getRoles) {
             patches.push(after("getRoles", RoleStore, ([gId], ret) => {
                 if (!ret) return ret;
-                if (!getTopRealRoleId(gId) && !ret[FAKE_OWNER_ROLE_ID]) {
-                    ret[FAKE_OWNER_ROLE_ID] = { ...FAKE_OWNER_ROLE };
+                if (!ret[FAKE_OWNER_ROLE_ID]) {
+                    const hasRealRole = Object.keys(ret).some(rid => rid !== gId);
+                    if (!hasRealRole) {
+                        ret[FAKE_OWNER_ROLE_ID] = { ...FAKE_OWNER_ROLE };
+                    }
                 }
                 return ret;
             }));
@@ -854,16 +857,10 @@
             return;
         }
 
-        const MemberStoreSingle = findByProps("getMember", "getMembers");
-        const realMember = MemberStoreSingle?.getMember?.(guildId, userId);
-        if (!realMember) {
-            showToast("❌ Участник с таким ID не найден");
-            return;
-        }
-
+        const realMember = getMembers(guildId).find(m => m.userId === userId);
         const base = hasFakeOverride(guildId, userId)
             ? getFakeRolesForUser(guildId, userId)
-            : (Array.isArray(realMember.roles) ? realMember.roles : []);
+            : (realMember && Array.isArray(realMember.roles) ? realMember.roles : []);
 
         if (!base.includes(roleId)) {
             setFakeRolesForUser(guildId, userId, [...base, roleId]);
@@ -912,8 +909,8 @@
                         const userId  = resolveCommandArg(args, "user_id", 0);
                         const roleId  = resolveCommandArg(args, "role_id", 1);
                         giveRoleLocally(guildId, userId, roleId);
-                    } catch {
-                        showToast("❌ Не вышло выдать роль");
+                    } catch (e) {
+                        showToast(`❌ Ошибка: ${e?.message || e}`);
                     }
                 },
             });
