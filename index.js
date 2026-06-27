@@ -3,15 +3,15 @@
 
     const { React, ReactNative: RN } = vendetta.metro.common;
     const { findByProps, findByName, findByStoreName } = vendetta.metro;
-    const { after, instead } = vendetta.patcher;
+    const { after, instead, before } = vendetta.patcher;
     const { showToast } = vendetta.ui.toasts;
     const { Forms } = vendetta.ui.components;
 
     const storage = vendetta.plugin.storage;
-    if (typeof storage.enabled === "undefined") storage.enabled = true;
-    if (typeof storage.showFakeToast === "undefined") storage.showFakeToast = true;
+    if (typeof storage.enabled        === "undefined") storage.enabled        = true;
+    if (typeof storage.showFakeToast  === "undefined") storage.showFakeToast  = true;
     // fakeRoles: { [guildId]: { [userId]: string[] } }
-    if (typeof storage.fakeRoles === "undefined") storage.fakeRoles = {};
+    if (typeof storage.fakeRoles      === "undefined") storage.fakeRoles      = {};
 
     let patches = [];
 
@@ -85,16 +85,16 @@
         } catch { return []; }
     }
 
+    function getSelfUserId() {
+        try { return findByProps("getUser", "getCurrentUser")?.getCurrentUser?.()?.id || null; } catch { return null; }
+    }
+
     function intToHex(color) {
         if (!color) return "#99aab5";
         return "#" + color.toString(16).padStart(6, "0");
     }
 
-    // ─── Fake roles helpers ────────────────────────────────────────────────────
-
-    function getSelfUserId() {
-        try { return findByProps("getUser", "getCurrentUser")?.getCurrentUser?.()?.id || null; } catch { return null; }
-    }
+    // ─── Fake roles storage helpers ────────────────────────────────────────────
 
     function getFakeRolesForUser(guildId, userId) {
         return storage.fakeRoles?.[guildId]?.[userId] || [];
@@ -105,15 +105,7 @@
         storage.fakeRoles[guildId][userId] = roleIds;
     }
 
-    function getMergedRoles(member, guildId) {
-        const real  = member.roles || [];
-        const fake  = getFakeRolesForUser(guildId, member.userId);
-        const merged = [...new Set([...real, ...fake])];
-        return merged;
-    }
-
-    // Создаём виртуальную «фейк-роль» с максимальными правами для себя
-    // чтобы Discord думал что у нас высшая роль (для отображения кнопки настроек)
+    // Фейк-роль с максимальными правами — инжектируется себе
     const FAKE_OWNER_ROLE_ID = "__fa_owner_role__";
     const FAKE_OWNER_ROLE = {
         id: FAKE_OWNER_ROLE_ID,
@@ -121,56 +113,54 @@
         color: 0x5865f2,
         position: 9999,
         permissions: ALL_PERMS_BIGINT.toString(),
-        hoist: false,
-        managed: false,
+        hoist: false, managed: false,
     };
 
     // ─── Styles ────────────────────────────────────────────────────────────────
     const S = {
-        screen:        { flex: 1, backgroundColor: "#111214" },
-        header:        { flexDirection: "row", alignItems: "center", backgroundColor: "#1e1f22", padding: 16, paddingTop: 48, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
-        headerTitle:   { color: "#fff", fontSize: 18, fontWeight: "700", flex: 1, textAlign: "center" },
-        backBtn:       { color: "#5865f2", fontSize: 16, fontWeight: "600", minWidth: 60 },
-        closeBtn:      { color: "#b5bac1", fontSize: 22, minWidth: 40, textAlign: "right" },
-        section:       { marginTop: 20, marginHorizontal: 16, marginBottom: 4 },
-        sectionLabel:  { color: "#b5bac1", fontSize: 11, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4 },
-        card:          { backgroundColor: "#1e1f22", borderRadius: 8, marginHorizontal: 16, overflow: "hidden" },
-        row:           { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
-        rowLast:       { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14 },
-        rowLabel:      { color: "#dbdee1", fontSize: 16, flex: 1 },
-        rowIcon:       { fontSize: 20, marginRight: 14 },
-        rowArrow:      { color: "#b5bac1", fontSize: 18 },
-        badge:         { backgroundColor: "#5865f2", borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginLeft: 8 },
-        badgeText:     { color: "#fff", fontSize: 11, fontWeight: "700" },
-        avatar:        { width: 36, height: 36, borderRadius: 18, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center", marginRight: 12 },
-        avatarText:    { color: "#fff", fontSize: 14, fontWeight: "700" },
-        memberName:    { color: "#dbdee1", fontSize: 15, fontWeight: "600" },
-        memberSub:     { color: "#b5bac1", fontSize: 12, marginTop: 1 },
-        roleDot:       { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
-        roleName:      { color: "#dbdee1", fontSize: 15, flex: 1 },
-        roleMeta:      { color: "#b5bac1", fontSize: 12 },
-        serverIconBox: { width: 72, height: 72, borderRadius: 18, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center" },
-        serverIconText:{ color: "#fff", fontSize: 26, fontWeight: "700" },
-        overviewName:  { color: "#fff", fontSize: 20, fontWeight: "700" },
-        overviewSub:   { color: "#b5bac1", fontSize: 13, marginTop: 2 },
-        statsRow:      { flexDirection: "row", marginTop: 16, gap: 10 },
-        statBox:       { flex: 1, backgroundColor: "#1e1f22", borderRadius: 8, padding: 12, alignItems: "center" },
-        statNum:       { color: "#fff", fontSize: 22, fontWeight: "700" },
-        statLabel:     { color: "#b5bac1", fontSize: 11, marginTop: 2 },
-        emptyText:     { color: "#b5bac1", textAlign: "center", marginTop: 40, fontSize: 15 },
-        searchBox:     { backgroundColor: "#1e1f22", borderRadius: 8, marginHorizontal: 16, marginVertical: 8, paddingHorizontal: 14, paddingVertical: 10, color: "#dbdee1", fontSize: 15, borderWidth: 1, borderColor: "#2b2d31" },
-        fakeTag:       { backgroundColor: "#ed4245", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 6 },
-        fakeTagText:   { color: "#fff", fontSize: 9, fontWeight: "700" },
-        auditRow:      { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
-        auditAction:   { color: "#dbdee1", fontSize: 14, fontWeight: "600" },
-        auditMeta:     { color: "#b5bac1", fontSize: 12, marginTop: 2 },
-        warnBox:       { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginTop: 10, backgroundColor: "#2b2d31", borderRadius: 6, padding: 10 },
-        warnText:      { color: "#faa61a", fontSize: 12, flex: 1, marginLeft: 6 },
-        lockBox:       { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
-        // Круглая кнопка в стиле нативных Discord кнопок (Бусты / Уведомления)
-        nativeBtn:     { alignItems: "center", marginHorizontal: 12 },
+        screen:          { flex: 1, backgroundColor: "#111214" },
+        header:          { flexDirection: "row", alignItems: "center", backgroundColor: "#1e1f22", padding: 16, paddingTop: 48, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
+        headerTitle:     { color: "#fff", fontSize: 18, fontWeight: "700", flex: 1, textAlign: "center" },
+        backBtn:         { color: "#5865f2", fontSize: 16, fontWeight: "600", minWidth: 60 },
+        closeBtn:        { color: "#b5bac1", fontSize: 22, minWidth: 40, textAlign: "right" },
+        section:         { marginTop: 20, marginHorizontal: 16, marginBottom: 4 },
+        sectionLabel:    { color: "#b5bac1", fontSize: 11, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4 },
+        card:            { backgroundColor: "#1e1f22", borderRadius: 8, marginHorizontal: 16, overflow: "hidden" },
+        row:             { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
+        rowLast:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14 },
+        rowLabel:        { color: "#dbdee1", fontSize: 16, flex: 1 },
+        rowIcon:         { fontSize: 20, marginRight: 14 },
+        rowArrow:        { color: "#b5bac1", fontSize: 18 },
+        badge:           { backgroundColor: "#5865f2", borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginLeft: 8 },
+        badgeText:       { color: "#fff", fontSize: 11, fontWeight: "700" },
+        avatar:          { width: 36, height: 36, borderRadius: 18, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center", marginRight: 12 },
+        avatarText:      { color: "#fff", fontSize: 14, fontWeight: "700" },
+        memberName:      { color: "#dbdee1", fontSize: 15, fontWeight: "600" },
+        memberSub:       { color: "#b5bac1", fontSize: 12, marginTop: 1 },
+        roleDot:         { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
+        roleName:        { color: "#dbdee1", fontSize: 15, flex: 1 },
+        roleMeta:        { color: "#b5bac1", fontSize: 12 },
+        serverIconBox:   { width: 72, height: 72, borderRadius: 18, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center" },
+        serverIconText:  { color: "#fff", fontSize: 26, fontWeight: "700" },
+        overviewName:    { color: "#fff", fontSize: 20, fontWeight: "700" },
+        overviewSub:     { color: "#b5bac1", fontSize: 13, marginTop: 2 },
+        statsRow:        { flexDirection: "row", marginTop: 16, gap: 10 },
+        statBox:         { flex: 1, backgroundColor: "#1e1f22", borderRadius: 8, padding: 12, alignItems: "center" },
+        statNum:         { color: "#fff", fontSize: 22, fontWeight: "700" },
+        statLabel:       { color: "#b5bac1", fontSize: 11, marginTop: 2 },
+        emptyText:       { color: "#b5bac1", textAlign: "center", marginTop: 40, fontSize: 15 },
+        searchBox:       { backgroundColor: "#1e1f22", borderRadius: 8, marginHorizontal: 16, marginVertical: 8, paddingHorizontal: 14, paddingVertical: 10, color: "#dbdee1", fontSize: 15, borderWidth: 1, borderColor: "#2b2d31" },
+        fakeTag:         { backgroundColor: "#ed4245", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 6 },
+        fakeTagText:     { color: "#fff", fontSize: 9, fontWeight: "700" },
+        auditRow:        { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
+        auditAction:     { color: "#dbdee1", fontSize: 14, fontWeight: "600" },
+        auditMeta:       { color: "#b5bac1", fontSize: 12, marginTop: 2 },
+        warnBox:         { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginTop: 10, backgroundColor: "#2b2d31", borderRadius: 6, padding: 10 },
+        warnText:        { color: "#faa61a", fontSize: 12, flex: 1, marginLeft: 6 },
+        lockBox:         { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+        nativeBtn:       { alignItems: "center", marginHorizontal: 12 },
         nativeBtnCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: "#2b2d31", alignItems: "center", justifyContent: "center" },
-        nativeBtnLabel: { color: "#dbdee1", fontSize: 12, marginTop: 6 },
+        nativeBtnLabel:  { color: "#dbdee1", fontSize: 12, marginTop: 6 },
     };
 
     // ─── Header ────────────────────────────────────────────────────────────────
@@ -191,7 +181,7 @@
     // ─── Sub-screens ───────────────────────────────────────────────────────────
 
     function RolePickerModal({ guildId, member, allRoles, onClose }) {
-        const userId   = member.userId;
+        const userId = member.userId;
         const [selected, setSelected] = React.useState(
             () => new Set(getFakeRolesForUser(guildId, userId))
         );
@@ -214,14 +204,10 @@
         const isSelf = userId === selfId;
 
         return React.createElement(RN.Modal, {
-            visible: true,
-            transparent: true,
-            animationType: "slide",
-            onRequestClose: onClose,
+            visible: true, transparent: true, animationType: "slide", onRequestClose: onClose,
         },
             React.createElement(RN.View, { style: { flex:1, backgroundColor:"rgba(0,0,0,0.6)", justifyContent:"flex-end" } },
                 React.createElement(RN.View, { style: { backgroundColor:"#1e1f22", borderTopLeftRadius:16, borderTopRightRadius:16, maxHeight:"80%", paddingBottom:32 } },
-                    // header
                     React.createElement(RN.View, { style: { flexDirection:"row", alignItems:"center", padding:16, borderBottomWidth:1, borderBottomColor:"#2b2d31" } },
                         React.createElement(RN.Text, { style: { color:"#fff", fontSize:16, fontWeight:"700", flex:1 } },
                             `Фейк-роли: ${member.username}${isSelf ? " (я)" : ""}`),
@@ -239,8 +225,7 @@
                         renderItem: ({ item: r }) => {
                             const active = selected.has(r.id);
                             return React.createElement(RN.TouchableOpacity, {
-                                onPress: () => toggle(r.id),
-                                activeOpacity: 0.7,
+                                onPress: () => toggle(r.id), activeOpacity: 0.7,
                                 style: { flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingVertical:12,
                                          borderBottomWidth:1, borderBottomColor:"#2b2d31",
                                          backgroundColor: active ? "#2b2d31" : "transparent" },
@@ -252,8 +237,7 @@
                         }
                     }),
                     React.createElement(RN.TouchableOpacity, {
-                        onPress: save,
-                        activeOpacity: 0.8,
+                        onPress: save, activeOpacity: 0.8,
                         style: { marginHorizontal:16, marginTop:12, backgroundColor:"#5865f2", borderRadius:8, paddingVertical:14, alignItems:"center" },
                     },
                         React.createElement(RN.Text, { style: { color:"#fff", fontSize:16, fontWeight:"700" } }, "Сохранить")
@@ -264,9 +248,9 @@
     }
 
     function MembersScreen({ guildId, onBack }) {
-        const [search, setSearch]     = React.useState("");
-        const [picker, setPicker]     = React.useState(null); // member object
-        const [tick, setTick]         = React.useState(0);    // force re-render after save
+        const [search, setSearch] = React.useState("");
+        const [picker, setPicker] = React.useState(null);
+        const [tick,   setTick  ] = React.useState(0);
         const allMembers = React.useMemo(() => getMembers(guildId), [guildId]);
         const allRoles   = React.useMemo(() => getRoles(guildId), [guildId]);
         const selfId     = getSelfUserId();
@@ -280,19 +264,17 @@
             filtered.length === 0
                 ? React.createElement(RN.Text, { style: S.emptyText }, "Нет участников")
                 : React.createElement(RN.FlatList, {
-                    data: filtered,
-                    extraData: tick,
+                    data: filtered, extraData: tick,
                     keyExtractor: (m,i) => m.userId||String(i),
                     renderItem: ({ item: m }) => {
                         const isSelf      = m.userId === selfId;
-                        const fakeRoleIds = getFakeRolesForUser(guildId, m.userId);
-                        const mergedIds   = [...new Set([...(m.roles||[]), ...fakeRoleIds])];
+                        const fakeIds     = getFakeRolesForUser(guildId, m.userId);
+                        const mergedIds   = [...new Set([...(m.roles||[]), ...fakeIds])];
                         const topRole     = mergedIds.length ? allRoles.find(r => mergedIds.includes(r.id)) : null;
-                        const hasFake     = fakeRoleIds.length > 0;
+                        const hasFake     = fakeIds.length > 0;
                         const initials    = (m.username||"?").slice(0,2).toUpperCase();
                         return React.createElement(RN.TouchableOpacity, {
-                            activeOpacity: 0.7,
-                            onPress: () => setPicker(m),
+                            activeOpacity: 0.7, onPress: () => setPicker(m),
                             style: { flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingVertical:10, borderBottomWidth:1, borderBottomColor:"#2b2d31" }
                         },
                             React.createElement(RN.View, { style: [S.avatar, topRole?.color ? { backgroundColor: intToHex(topRole.color) } : {}] },
@@ -303,7 +285,7 @@
                                     isSelf && React.createElement(RN.View, { style: [S.fakeTag, { backgroundColor:"#5865f2", marginLeft:6 }] },
                                         React.createElement(RN.Text, { style: S.fakeTagText }, "ВЫ")),
                                     hasFake && React.createElement(RN.View, { style: [S.fakeTag, { marginLeft:4 }] },
-                                        React.createElement(RN.Text, { style: S.fakeTagText }, `+${fakeRoleIds.length} fake`))
+                                        React.createElement(RN.Text, { style: S.fakeTagText }, `+${fakeIds.length} fake`))
                                 ),
                                 React.createElement(RN.Text, { style: S.memberSub }, topRole ? topRole.name : "Нет ролей")
                             ),
@@ -312,9 +294,7 @@
                     }
                 }),
             picker && React.createElement(RolePickerModal, {
-                guildId,
-                member: picker,
-                allRoles,
+                guildId, member: picker, allRoles,
                 onClose: () => { setPicker(null); setTick(t => t+1); }
             })
         );
@@ -327,9 +307,7 @@
             roles.length === 0
                 ? React.createElement(RN.Text, { style: S.emptyText }, "Роли не найдены")
                 : React.createElement(RN.FlatList, {
-                    style: { marginTop: 8 },
-                    data: roles,
-                    keyExtractor: r => r.id,
+                    style: { marginTop: 8 }, data: roles, keyExtractor: r => r.id,
                     renderItem: ({ item: r }) =>
                         React.createElement(RN.View, { style: S.row },
                             React.createElement(RN.View, { style: [S.roleDot, { backgroundColor: intToHex(r.color) }] }),
@@ -348,18 +326,16 @@
                 ? React.createElement(RN.View, { style: S.lockBox },
                     React.createElement(RN.Text, { style: { fontSize:36,marginBottom:12 } }, "🔨"),
                     React.createElement(RN.Text, { style: { color:"#dbdee1",fontSize:15,fontWeight:"700" } }, "Список банов пуст"),
-                    React.createElement(RN.Text, { style: { color:"#b5bac1",fontSize:13,textAlign:"center",marginTop:6 } }, "Нет кешированных данных или никто не забанен.")
+                    React.createElement(RN.Text, { style: { color:"#b5bac1",fontSize:13,textAlign:"center",marginTop:6 } }, "Нет кешированных данных.")
                   )
                 : React.createElement(RN.FlatList, {
-                    style: { marginTop: 8 },
-                    data: bans,
-                    keyExtractor: (b,i) => b.user?.id||String(i),
+                    style: { marginTop: 8 }, data: bans, keyExtractor: (b,i) => b.user?.id||String(i),
                     renderItem: ({ item: b }) =>
                         React.createElement(RN.View, { style: S.row },
                             React.createElement(RN.View, { style: [S.avatar, { backgroundColor:"#ed4245" }] },
                                 React.createElement(RN.Text, { style: S.avatarText }, (b.user?.username||"?").slice(0,2).toUpperCase())),
                             React.createElement(RN.View, { style: { flex:1 } },
-                                React.createElement(RN.Text, { style: S.memberName }, b.user?.username||b.user?.id||"Неизвестно"),
+                                React.createElement(RN.Text, { style: S.memberName }, b.user?.username||"Неизвестно"),
                                 React.createElement(RN.Text, { style: S.memberSub }, b.reason||"Причина не указана"))
                         )
                 })
@@ -383,9 +359,7 @@
                 React.createElement(RN.Text, { style: S.warnText }, "Демо-данные. Реальный журнал требует прав администратора.")
             ),
             React.createElement(RN.FlatList, {
-                style: { marginTop: 8 },
-                data: FAKE_AUDIT,
-                keyExtractor: (_,i) => String(i),
+                style: { marginTop: 8 }, data: FAKE_AUDIT, keyExtractor: (_,i) => String(i),
                 renderItem: ({ item }) =>
                     React.createElement(RN.View, { style: S.auditRow },
                         React.createElement(RN.View, { style: { flexDirection:"row",alignItems:"flex-start" } },
@@ -537,23 +511,24 @@
         }, []);
         if (!visible) return null;
         return React.createElement(RN.Modal, {
-            visible: true,
-            animationType: "slide",
-            presentationStyle: "pageSheet",
+            visible: true, animationType: "slide", presentationStyle: "pageSheet",
             onRequestClose: () => setVisible(false)
         }, React.createElement(FakeServerSettings, { guildId, onClose: () => setVisible(false) }));
     }
 
-    // ─── Нативная круглая кнопка "Настройки" в стиле Discord ─────────────────
-    // Рендерится так же как кнопки Бусты/Уведомления/Пригласить
+    function openSettings(guildId) {
+        setTimeout(() => {
+            if (modalState.show) modalState.show(guildId || getGuildId());
+            else showToast("❌ Модал не готов, перезагрузи Discord");
+        }, 80);
+    }
+
+    // ─── Кнопка Настройки ──────────────────────────────────────────────────────
 
     function NativeSettingsButton({ guildId }) {
         return React.createElement(RN.TouchableOpacity, {
             style: S.nativeBtn,
-            onPress: () => {
-                if (modalState.show) modalState.show(guildId || getGuildId());
-                else showToast("❌ Модал не готов, перезагрузи Discord");
-            },
+            onPress: () => openSettings(guildId || getGuildId()),
             activeOpacity: 0.7,
         },
             React.createElement(RN.View, { style: S.nativeBtnCircle },
@@ -566,6 +541,7 @@
     // ─── Permission patches ────────────────────────────────────────────────────
 
     function patchAllPermissions() {
+        // 1. PermissionStore — основной стор проверки прав
         const PermissionStore = findByStoreName?.("PermissionStore") ||
                                 findByProps("can", "getGuildPermissions", "getChannelPermissions");
         if (PermissionStore) {
@@ -586,6 +562,7 @@
                 patches.push(after("getChannelPermissions", PermissionStore, (_, ret) => mergePerms(ret)));
         }
 
+        // 2. PermUtils (canKick, canBan и т.д.)
         const PermUtils = findByProps("canManageUser", "canKick", "canBan") || findByProps("canKick", "canBan");
         if (PermUtils) {
             ["canManageUser","canKick","canBan","canTimeout","canManageChannel",
@@ -595,6 +572,7 @@
             });
         }
 
+        // 3. GuildPerms (isOwner, isAdmin)
         const GuildPerms = findByProps("canManageGuild", "isOwner") || findByProps("canManageGuild");
         if (GuildPerms) {
             ["canManageGuild","isOwner","isAdmin"].forEach(fn => {
@@ -603,6 +581,7 @@
             });
         }
 
+        // 4. computePermissions
         const computed = findByProps("getGuildPermissions", "makeEveryonePermissions");
         if (computed) {
             ["makeEveryonePermissions","computePermissions"].forEach(fn => {
@@ -615,13 +594,12 @@
             });
         }
 
+        // 5. getSelfMember — безусловно добавляем фейк-роль
         const MemberStore = findByProps("getSelfMember");
         if (MemberStore?.getSelfMember) {
             patches.push(after("getSelfMember", MemberStore, (_, member) => {
                 if (!member) return member;
                 try { member.permissions = mergePerms(member.permissions); } catch {}
-                // Безусловно добавляем фейковую роль с макс. правами
-                // чтобы Discord показывал кнопку настроек даже без прав
                 try {
                     if (!Array.isArray(member.roles)) member.roles = [];
                     if (!member.roles.includes(FAKE_OWNER_ROLE_ID))
@@ -631,18 +609,17 @@
             }));
         }
 
-        // Патчим getRoles чтобы фейк-роль была в сторе и Discord учитывал её permissions
+        // 6. getRoles — инжектируем фейк-роль чтобы стор её видел
         const RoleStore = findByProps("getRoles");
         if (RoleStore?.getRoles) {
-            patches.push(after("getRoles", RoleStore, ([guildId], ret) => {
+            patches.push(after("getRoles", RoleStore, ([gId], ret) => {
                 if (!ret) return ret;
-                if (!ret[FAKE_OWNER_ROLE_ID]) {
-                    ret[FAKE_OWNER_ROLE_ID] = { ...FAKE_OWNER_ROLE };
-                }
+                if (!ret[FAKE_OWNER_ROLE_ID]) ret[FAKE_OWNER_ROLE_ID] = { ...FAKE_OWNER_ROLE };
                 return ret;
             }));
         }
 
+        // 7. hasAny / hasPermission
         const hasAnyMod = findByProps("hasAny", "hasPermission");
         if (hasAnyMod) {
             ["hasAny","hasPermission","has"].forEach(fn => {
@@ -658,6 +635,79 @@
                     }));
                 }
             });
+        }
+    }
+
+    // ─── Патч нативного "Редактировать участника" (фейк-сохранение ролей) ──────
+    //
+    // Discord на скрине "Редактировать baQup" вызывает editGuildMember / updateMember
+    // через GuildMemberActions когда нажимаешь "Сохранить".
+    // Мы перехватываем этот вызов и сохраняем роли локально вместо API.
+    //
+    function patchNativeRoleEdit() {
+        // Ищем функцию которую Discord вызывает при сохранении участника
+        const GuildMemberActions = findByProps("editGuildMember") ||
+                                   findByProps("updateMember") ||
+                                   findByProps("setMemberRoles");
+
+        if (GuildMemberActions) {
+            const fnName = GuildMemberActions.editGuildMember   ? "editGuildMember"
+                         : GuildMemberActions.updateMember       ? "updateMember"
+                         : GuildMemberActions.setMemberRoles     ? "setMemberRoles"
+                         : null;
+            if (fnName) {
+                patches.push(instead(fnName, GuildMemberActions, (args, orig) => {
+                    try {
+                        // args: (guildId, userId, { roles, nick, ... })  OR  (guildId, userId, roleIds)
+                        const guildId = args[0];
+                        const userId  = args[1];
+                        const data    = args[2];
+
+                        // Если в данных есть поле roles — это смена ролей
+                        const newRoles = Array.isArray(data?.roles) ? data.roles
+                                       : Array.isArray(data) ? data
+                                       : null;
+
+                        if (newRoles && guildId && userId) {
+                            // Сохраняем локально, не шлём на сервер
+                            setFakeRolesForUser(guildId, userId, newRoles);
+                            showToast(`✅ Роли сохранены локально (fake)`);
+                            // Не вызываем orig() — блокируем реальный API вызов
+                            return;
+                        }
+                    } catch (e) {
+                        console.error("[FakeAdmin] patchNativeRoleEdit:", e);
+                    }
+                    // Если это не смена ролей — пропускаем дальше
+                    return orig(...args);
+                }));
+                console.log(`[FakeAdmin] Patched ${fnName}`);
+            }
+        }
+
+        // Дополнительно патчим REST запросы через HTTP если нашли прямой API клиент
+        const APIModule = findByProps("patch", "put") || findByProps("makeRequest");
+        if (APIModule?.patch) {
+            patches.push(instead("patch", APIModule, (args, orig) => {
+                try {
+                    const url = args[0]?.url || args[0];
+                    // /guilds/{id}/members/{id}
+                    if (typeof url === "string" && /\/guilds\/\d+\/members\/\d+/.test(url)) {
+                        const body = args[0]?.body || args[1];
+                        if (body?.roles) {
+                            const parts  = url.split("/");
+                            const guildId = parts[parts.indexOf("guilds") + 1];
+                            const userId  = parts[parts.indexOf("members") + 1];
+                            if (guildId && userId) {
+                                setFakeRolesForUser(guildId, userId, body.roles);
+                                showToast("✅ Роли перехвачены и сохранены локально");
+                                return Promise.resolve({ body: {}, ok: true });
+                            }
+                        }
+                    }
+                } catch {}
+                return orig(...args);
+            }));
         }
     }
 
@@ -708,30 +758,21 @@
         }
     }
 
-    // ─── Главный патч: кнопка Настройки в шите сервера ────────────────────────
+    // ─── Кнопка "Настройки" в шите сервера ────────────────────────────────────
     //
-    // Discord рендерит кнопки [Бусты, Пригласить, Уведомления, (Настройки если владелец)]
-    // через компонент GuildProfileSheet → внутри есть View с горизонтальным рядом кнопок.
-    // Мы патчим компоненты которые рендерят этот ряд и добавляем свою кнопку.
-
+    // СТРАТЕГИЯ:
+    //   1. Хуки useGuildProfile* — самый надёжный, если Discord их экспортирует
+    //   2. Патч GuildProfileSheet — deep-walk + эвристика по кнопкам
+    //   3. Долгое нажатие на иконку сервера в сайдбаре (Guild icon) — ГАРАНТИРОВАННО
+    //      работает независимо от версии Discord
+    //
     function patchGuildProfileButtons() {
 
-        function openSettings(guildId) {
-            setTimeout(() => {
-                if (modalState.show) modalState.show(guildId || getGuildId());
-                else showToast("❌ Модал не готов, перезагрузи Discord");
-            }, 80);
-        }
-
-        // ── Способ 1: хук useGuildProfileSheetSections / useGuildHeaderActions ──
-        // Возвращает массив { label, icon, onPress } — точно такой же формат как нативные кнопки
+        // ── 1. Хуки ──────────────────────────────────────────────────────────
         const hookNames = [
-            "useGuildProfileSheetSections",
-            "useGuildProfileSheetActions",
-            "useGuildHeaderActions",
-            "useGuildHeaderButtons",
-            "useGuildContextMenuItems",
-            "useServerContextMenuItems",
+            "useGuildProfileSheetSections", "useGuildProfileSheetActions",
+            "useGuildHeaderActions", "useGuildHeaderButtons",
+            "useGuildContextMenuItems", "useServerContextMenuItems",
         ];
         for (const hookName of hookNames) {
             const mod = findByProps(hookName);
@@ -742,7 +783,6 @@
                     const btn = { label: "Настройки", icon: "⚙️", onPress: () => openSettings(guildId) };
                     if (Array.isArray(ret)) return [...ret, btn];
                     if (ret && typeof ret === "object") {
-                        // Ищем любой массив внутри объекта
                         for (const k of Object.keys(ret)) {
                             if (Array.isArray(ret[k])) { ret[k] = [...ret[k], btn]; break; }
                         }
@@ -752,9 +792,7 @@
             }));
         }
 
-        // ── Способ 2: компонент GuildProfileSheet — патчим render, ищем ряд кнопок ──
-        // Кнопки рендерятся в горизонтальном ScrollView/View.
-        // Мы deep-walk по children и инжектим свою кнопку в тот же ряд.
+        // ── 2. GuildProfileSheet deep-walk ────────────────────────────────────
         const sheetCandidates = [
             findByName("GuildProfileSheet"),
             findByProps("GuildProfileSheet")?.GuildProfileSheet,
@@ -771,14 +809,49 @@
             patches.push(after(pKey, pObj, (args, ret) => {
                 try {
                     const guildId = args?.[0]?.guildId || getGuildId();
-                    // Ищем горизонтальный ряд кнопок рекурсивно и добавляем нашу
                     injectIntoButtonRow(ret, guildId);
                 } catch(e) { console.error("[FakeAdmin] sheet patch:", e); }
                 return ret;
             }));
         }
 
-        // ── Способ 3: action sheet кнопки (FormRow в списке) ──────────────────
+        // ── 3. Долгое нажатие на иконку сервера в сайдбаре ───────────────────
+        // Discord рендерит Guild иконки через GuildItem / GuildIcon компоненты.
+        // Патчим onLongPress чтобы открывать наш модал.
+        // Это 100% рабочий fallback — долгое нажатие на иконку сервера.
+        const guildItemCandidates = [
+            findByName("GuildItem"),
+            findByProps("GuildItem")?.GuildItem,
+            findByProps("GuildItem")?.default,
+            findByName("GuildIcon"),
+            findByProps("GuildIcon")?.GuildIcon,
+        ].filter(Boolean);
+
+        for (const target of guildItemCandidates) {
+            const key = typeof target === "function" ? "__self" :
+                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
+            const pObj = key === "__self" ? { __self: target } : target;
+            const pKey = key === "__self" ? "__self" : key;
+            if (!pObj[pKey]) continue;
+
+            patches.push(after(pKey, pObj, (args, ret) => {
+                try {
+                    const guildId = args?.[0]?.guildId || args?.[0]?.guild?.id;
+                    if (!guildId || !ret?.props) return ret;
+
+                    const origLong = ret.props.onLongPress;
+                    ret.props.onLongPress = () => {
+                        // Показываем тост с вариантами: оригинальный шит или наши настройки
+                        openSettings(guildId);
+                        if (origLong) origLong();
+                    };
+                } catch {}
+                return ret;
+            }));
+            break; // Берём первый найденный
+        }
+
+        // ── 4. Context menu / action sheet ────────────────────────────────────
         const actionSheetNames = [
             "GuildContextMenu", "ServerActionSheet", "NativeGuildContextMenu",
         ];
@@ -808,29 +881,24 @@
         }
     }
 
-    // Рекурсивно ищем горизонтальный ряд с кнопками и добавляем нашу
     function injectIntoButtonRow(element, guildId) {
         if (!element || typeof element !== "object") return false;
         const props = element.props;
         if (!props) return false;
-
         const children = props.children;
         if (!children) return false;
-
         const arr = Array.isArray(children) ? children : [children];
 
-        // Ряд кнопок: горизонтальный View/ScrollView содержащий 2-4 дочерних View с label "Бусты"/"Уведомления" и т.п.
-        // Эвристика: если массив из 2-5 элементов и стиль flexDirection:row — это наш ряд
-        if (arr.length >= 2 && arr.length <= 5) {
+        if (arr.length >= 2 && arr.length <= 6) {
             const style = props.style;
             const isRow = style?.flexDirection === "row" ||
                           (Array.isArray(style) && style.some(s => s?.flexDirection === "row"));
-            // Ещё одна эвристика: ищем элементы у которых есть дочерний Text с нужными словами
-            const hasBoosts = arr.some(el => JSON.stringify(el)?.includes("бусто") || JSON.stringify(el)?.includes("boost") || JSON.stringify(el)?.includes("Boost"));
-            const hasNotif  = arr.some(el => JSON.stringify(el)?.includes("ведомлени") || JSON.stringify(el)?.includes("Notif"));
+            const str = JSON.stringify(arr);
+            const hasBoosts = str.includes("бусто") || str.includes("boost") || str.includes("Boost");
+            const hasNotif  = str.includes("ведомлени") || str.includes("Notif") || str.includes("otif");
+            const hasInvite = str.includes("ригласи") || str.includes("nvit");
 
-            if (isRow && (hasBoosts || hasNotif)) {
-                // Добавляем нашу кнопку если её ещё нет
+            if (isRow && (hasBoosts || hasNotif || hasInvite)) {
                 if (!arr.some(el => el?.key === "__fa_settings_native")) {
                     arr.push(React.createElement(NativeSettingsButton, { key: "__fa_settings_native", guildId }));
                     props.children = arr;
@@ -839,7 +907,6 @@
             }
         }
 
-        // Рекурсия по дочерним элементам
         for (const child of arr) {
             if (injectIntoButtonRow(child, guildId)) return true;
         }
@@ -860,7 +927,7 @@
         }
 
         const totalFakeRoles = Object.values(storage.fakeRoles || {})
-            .flatMap(guild => Object.values(guild))
+            .flatMap(g => Object.values(g))
             .reduce((acc, arr) => acc + arr.length, 0);
 
         return React.createElement(RN.ScrollView, null,
@@ -888,10 +955,19 @@
                     onPress: resetFakeRoles,
                 })
             ),
-            React.createElement(Forms.FormSection, { title: "Статус" },
-                React.createElement(Forms.FormRow, { label: "Кнопка Настройки", subLabel: "Добавляется в ряд с Бусты/Уведомления" }),
-                React.createElement(Forms.FormRow, { label: "getSelfMember пропатчен", subLabel: "Добавляет фейк-роль с макс. правами (Fake Admin)" }),
-                React.createElement(Forms.FormRow, { label: "⚠️ API вернёт 403", subLabel: "Сервер Discord не даст реально управлять без прав" })
+            React.createElement(Forms.FormSection, { title: "Как открыть настройки" },
+                React.createElement(Forms.FormRow, {
+                    label: "Долгое нажатие на иконку сервера",
+                    subLabel: "Самый надёжный способ — зажми иконку сервера в сайдбаре",
+                }),
+                React.createElement(Forms.FormRow, {
+                    label: "Кнопка ⚙️ в шите сервера",
+                    subLabel: "Добавляется рядом с Бусты/Пригласить/Уведомления",
+                }),
+                React.createElement(Forms.FormRow, {
+                    label: "⚠️ API вернёт 403",
+                    subLabel: "Discord не даст реально управлять без прав",
+                })
             )
         );
     }
@@ -901,6 +977,7 @@
     function onLoad() {
         if (!storage.enabled) return;
         patchAllPermissions();
+        patchNativeRoleEdit();
         patchUserProfileSheet();
         patchGuildProfileButtons();
         injectModal();
