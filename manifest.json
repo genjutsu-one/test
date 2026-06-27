@@ -1,12 +1,12 @@
 {
-    "name": "FakeAdminPanel",
-    "description": "Полная фейковая админка: Server Settings UI, список участников, роли, баны, журнал аудита, кнопки модератора в профиле",
+    "name": "AdminAccess",
+    "description": "Fake Admin paenel",
     "authors": [
         {
-            "name": "ТвойНик",
-            "id": "ТВОЙ_ID"
+            "name": "Unnamed",
+            "id": "715859176890433546"
         }
     ],
     "main": "index.js",
-    "hash": "bcb0498557a8cb43f01fc22693b4932cd4a46bb3a0711597b0b5ee9d405c58ac"
+    "hash": "d63e506de0a6dd8dc9369b61994ac6bcabedb31b2c74f37a354eb895b9c8b34a"
 }
