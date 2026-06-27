@@ -2,20 +2,16 @@
     "use strict";
 
     const { React, ReactNative: RN } = vendetta.metro.common;
-    const { findByProps, findByName, findByStoreName } = vendetta.metro;
-    const { after, instead, before } = vendetta.patcher;
+    const { findByProps, findByName } = vendetta.metro;
+    const { after, instead } = vendetta.patcher;
     const { showToast } = vendetta.ui.toasts;
     const { Forms } = vendetta.ui.components;
 
     const storage = vendetta.plugin.storage;
-    if (typeof storage.enabled        === "undefined") storage.enabled        = true;
-    if (typeof storage.showFakeToast  === "undefined") storage.showFakeToast  = true;
-    // fakeRoles: { [guildId]: { [userId]: string[] } }
-    if (typeof storage.fakeRoles      === "undefined") storage.fakeRoles      = {};
+    if (typeof storage.fakeRoles === "undefined") storage.fakeRoles = {};
 
     let patches = [];
 
-    // ─── Permission bits ───────────────────────────────────────────────────────
     const ADMINISTRATOR       = 0x8n;
     const MANAGE_GUILD        = 0x20n;
     const MANAGE_CHANNELS     = 0x10n;
@@ -48,10 +44,10 @@
             if (typeof original === "string") return combined.toString();
             const asNum = Number(combined);
             return Number.isSafeInteger(asNum) ? asNum : combined.toString();
-        } catch { return original; }
+        } catch {
+            return original;
+        }
     }
-
-    // ─── Helpers ───────────────────────────────────────────────────────────────
 
     function getGuildId() {
         try { return findByProps("getGuildId")?.getGuildId?.() || null; } catch { return null; }
@@ -64,25 +60,31 @@
     function getMembers(guildId) {
         try {
             const MemberStore = findByProps("getMembers", "getMember");
-            const UserStore   = findByProps("getUser", "getCurrentUser");
+            const UserStore = findByProps("getUser", "getCurrentUser");
             return (MemberStore?.getMembers?.(guildId) || []).map(m => {
                 const user = UserStore?.getUser?.(m.userId) || {};
                 return { ...m, username: user.username || m.userId };
             });
-        } catch { return []; }
+        } catch {
+            return [];
+        }
     }
 
     function getRoles(guildId) {
         try {
             return Object.values(findByProps("getRoles")?.getRoles?.(guildId) || {})
                 .sort((a, b) => b.position - a.position);
-        } catch { return []; }
+        } catch {
+            return [];
+        }
     }
 
     function getBans(guildId) {
         try {
             return Object.values(findByProps("getBans", "isBanned")?.getBans?.(guildId) || {});
-        } catch { return []; }
+        } catch {
+            return [];
+        }
     }
 
     function getSelfUserId() {
@@ -94,7 +96,9 @@
         return "#" + color.toString(16).padStart(6, "0");
     }
 
-    // ─── Fake roles storage helpers ────────────────────────────────────────────
+    function hasFakeOverride(guildId, userId) {
+        return Array.isArray(storage.fakeRoles?.[guildId]?.[userId]);
+    }
 
     function getFakeRolesForUser(guildId, userId) {
         return storage.fakeRoles?.[guildId]?.[userId] || [];
@@ -105,12 +109,6 @@
         storage.fakeRoles[guildId][userId] = roleIds;
     }
 
-    // Резервная фейк-роль — ТОЛЬКО если на сервере вообще нет ролей кроме @everyone.
-    // ID сделан в формате снежинки (числовая строка), а не произвольным текстом —
-    // нативный код Discord местами делает BigInt(role.id) / сравнения ID как чисел
-    // (сортировка по position, тай-брейки), и нечисловой ID там может тихо вызывать
-    // исключение, из-за которого конкретная проверка прав фейлится в false,
-    // даже если PermissionStore.can() уже патчен и возвращает true.
     const FAKE_OWNER_ROLE_ID = "999999999999999999";
     const FAKE_OWNER_ROLE = {
         id: FAKE_OWNER_ROLE_ID,
@@ -121,24 +119,21 @@
         hoist: false, managed: false,
     };
 
-    // Достаём ID самой крутой РЕАЛЬНОЙ роли на сервере (а не выдумываем новую).
-    // Это надёжнее: у роли уже валидный snowflake, реальное имя/цвет, и она уже
-    // существует в RoleStore — никуда её дополнительно инжектить не надо.
-    // Приоритет: роль с битом ADMINISTRATOR -> просто верхняя по позиции (не @everyone).
     function getTopRealRoleId(guildId) {
         try {
-            const roles = getRoles(guildId); // уже отсортированы по position desc
-            const real = roles.filter(r => r.id !== guildId); // @everyone.id === guildId
+            const roles = getRoles(guildId);
+            const real = roles.filter(r => r.id !== guildId);
             if (!real.length) return null;
             const withAdmin = real.find(r => {
                 try { return (BigInt(r.permissions || 0) & ADMINISTRATOR) === ADMINISTRATOR; }
                 catch { return false; }
             });
             return (withAdmin || real[0]).id;
-        } catch { return null; }
+        } catch {
+            return null;
+        }
     }
 
-    // ─── Styles ────────────────────────────────────────────────────────────────
     const S = {
         screen:          { flex: 1, backgroundColor: "#111214" },
         header:          { flexDirection: "row", alignItems: "center", backgroundColor: "#1e1f22", padding: 16, paddingTop: 48, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
@@ -185,7 +180,6 @@
         nativeBtnLabel:  { color: "#dbdee1", fontSize: 12, marginTop: 6 },
     };
 
-    // ─── Header ────────────────────────────────────────────────────────────────
     function Header({ title, onBack, onClose }) {
         return React.createElement(RN.View, { style: S.header },
             onBack
@@ -199,8 +193,6 @@
                 : React.createElement(RN.View, { style: { minWidth: 40 } })
         );
     }
-
-    // ─── Sub-screens ───────────────────────────────────────────────────────────
 
     function RolePickerModal({ guildId, member, allRoles, onClose }) {
         const userId = member.userId;
@@ -400,7 +392,7 @@
         const guild   = getGuildData(guildId);
         const members = React.useMemo(() => getMembers(guildId), [guildId]);
         const roles   = React.useMemo(() => getRoles(guildId), [guildId]);
-        const name    = guild?.name || "Сервер";
+        const name     = guild?.name || "Сервер";
         const initials = name.split(" ").map(w=>w[0]).filter(Boolean).join("").slice(0,3).toUpperCase();
         return React.createElement(RN.ScrollView, { style: S.screen },
             React.createElement(Header, { title: "Обзор", onBack }),
@@ -451,8 +443,6 @@
             )
         );
     }
-
-    // ─── FakeServerSettings ────────────────────────────────────────────────────
 
     function FakeServerSettings({ guildId, onClose }) {
         const [screen, setScreen] = React.useState(null);
@@ -520,8 +510,6 @@
         );
     }
 
-    // ─── Modal wrapper ─────────────────────────────────────────────────────────
-
     const modalState = { show: null };
 
     function RootModal() {
@@ -545,8 +533,6 @@
         }, 80);
     }
 
-    // ─── Кнопка Настройки ──────────────────────────────────────────────────────
-
     function NativeSettingsButton({ guildId }) {
         return React.createElement(RN.TouchableOpacity, {
             style: S.nativeBtn,
@@ -560,12 +546,8 @@
         );
     }
 
-    // ─── Permission patches ────────────────────────────────────────────────────
-
     function patchAllPermissions() {
-        // 1. PermissionStore — основной стор проверки прав
-        const PermissionStore = findByStoreName?.("PermissionStore") ||
-                                findByProps("can", "getGuildPermissions", "getChannelPermissions");
+        const PermissionStore = findByProps("can", "getGuildPermissions", "getChannelPermissions");
         if (PermissionStore) {
             ["can", "canWithPartialContext", "canEveryone", "canManageUser"].forEach(fn => {
                 if (typeof PermissionStore[fn] === "function") {
@@ -584,7 +566,6 @@
                 patches.push(after("getChannelPermissions", PermissionStore, (_, ret) => mergePerms(ret)));
         }
 
-        // 2. PermUtils (canKick, canBan и т.д.)
         const PermUtils = findByProps("canManageUser", "canKick", "canBan") || findByProps("canKick", "canBan");
         if (PermUtils) {
             ["canManageUser","canKick","canBan","canTimeout","canManageChannel",
@@ -594,7 +575,6 @@
             });
         }
 
-        // 3. GuildPerms (isOwner, isAdmin)
         const GuildPerms = findByProps("canManageGuild", "isOwner") || findByProps("canManageGuild");
         if (GuildPerms) {
             ["canManageGuild","isOwner","isAdmin"].forEach(fn => {
@@ -603,7 +583,6 @@
             });
         }
 
-        // 4. computePermissions
         const computed = findByProps("getGuildPermissions", "makeEveryonePermissions");
         if (computed) {
             ["makeEveryonePermissions","computePermissions"].forEach(fn => {
@@ -616,60 +595,58 @@
             });
         }
 
-        // ─── Кэш клонов: один и тот же исходный объект всегда отдаёт ОДНУ И ТУ ЖЕ
-        //     подделанную ссылку. Без этого каждый вызов getSelfMember/getMember/
-        //     getGuild создавал НОВЫЙ объект -> React/Flux видел "новые" данные
-        //     на каждый ре-рендер -> бесконечный цикл ре-рендеров -> фриз всего
-        //     приложения. Пересчёт происходит только когда стор реально вернул
-        //     новую ссылку (т.е. данные действительно обновились).
         const memberCloneCache = new WeakMap();
         const guildCloneCache  = new WeakMap();
 
-        // 5. getSelfMember — добавляем себе ID самой крутой РЕАЛЬНОЙ роли сервера.
         const MemberStore = findByProps("getSelfMember");
         if (MemberStore?.getSelfMember) {
             patches.push(after("getSelfMember", MemberStore, ([guildId], member) => {
                 if (!member) return member;
                 if (memberCloneCache.has(member)) return memberCloneCache.get(member);
                 try {
+                    const userId = member.userId || getSelfUserId();
+                    const base = hasFakeOverride(guildId, userId) ? getFakeRolesForUser(guildId, userId) : (member.roles || []);
                     const topRoleId = getTopRealRoleId(guildId) || FAKE_OWNER_ROLE_ID;
-                    const roles = Array.isArray(member.roles) ? member.roles : [];
-                    const newRoles = roles.includes(topRoleId) ? roles : [topRoleId, ...roles];
+                    const roles = base.includes(topRoleId) ? base : [topRoleId, ...base];
                     const clone = Object.assign(Object.create(Object.getPrototypeOf(member)), member, {
-                        roles: newRoles,
+                        roles,
                         permissions: mergePerms(member.permissions),
                     });
                     memberCloneCache.set(member, clone);
                     return clone;
-                } catch { return member; }
+                } catch {
+                    return member;
+                }
             }));
         }
 
-        // 5b. getMember(guildId, userId) — то же самое, но только про САМОГО СЕБЯ
-        //     (чужие участники не трогаются — у них своя логика fakeRoles).
         const MemberStoreSingle = findByProps("getMember", "getMembers");
         if (MemberStoreSingle?.getMember) {
             patches.push(after("getMember", MemberStoreSingle, ([guildId, userId], member) => {
                 if (!member) return member;
                 const selfId = getSelfUserId();
-                if (userId !== selfId) return member;
+                const isSelf = userId === selfId;
+                const override = hasFakeOverride(guildId, userId);
+                if (!isSelf && !override) return member;
                 if (memberCloneCache.has(member)) return memberCloneCache.get(member);
                 try {
-                    const topRoleId = getTopRealRoleId(guildId) || FAKE_OWNER_ROLE_ID;
-                    const roles = Array.isArray(member.roles) ? member.roles : [];
-                    const newRoles = roles.includes(topRoleId) ? roles : [topRoleId, ...roles];
+                    let roles = override ? getFakeRolesForUser(guildId, userId) : (Array.isArray(member.roles) ? member.roles : []);
+                    if (isSelf) {
+                        const topRoleId = getTopRealRoleId(guildId) || FAKE_OWNER_ROLE_ID;
+                        if (!roles.includes(topRoleId)) roles = [topRoleId, ...roles];
+                    }
                     const clone = Object.assign(Object.create(Object.getPrototypeOf(member)), member, {
-                        roles: newRoles,
-                        permissions: mergePerms(member.permissions),
+                        roles,
+                        permissions: isSelf ? mergePerms(member.permissions) : member.permissions,
                     });
                     memberCloneCache.set(member, clone);
                     return clone;
-                } catch { return member; }
+                } catch {
+                    return member;
+                }
             }));
         }
 
-        // 6. getRoles — инжектируем фейк-роль ТОЛЬКО как резерв (если на сервере
-        //    реально нет ни одной роли кроме @everyone — getTopRealRoleId вернёт null).
         const RoleStore = findByProps("getRoles");
         if (RoleStore?.getRoles) {
             patches.push(after("getRoles", RoleStore, ([gId], ret) => {
@@ -681,9 +658,6 @@
             }));
         }
 
-        // 6b. getGuild/getGuilds — спуфим ownerId на себя (кэшировано, см. выше).
-        //     ⚠️ Это самый "горячий" вызов в приложении — если после теста снова
-        //     будет фриз, первым делом закомментируй именно этот блок.
         const GuildStore = findByProps("getGuild", "getGuilds");
         if (GuildStore?.getGuild) {
             patches.push(after("getGuild", GuildStore, (_, guild) => {
@@ -695,11 +669,12 @@
                     const clone = Object.assign(Object.create(Object.getPrototypeOf(guild)), guild, { ownerId: selfId });
                     guildCloneCache.set(guild, clone);
                     return clone;
-                } catch { return guild; }
+                } catch {
+                    return guild;
+                }
             }));
         }
 
-        // 7. hasAny / hasPermission
         const hasAnyMod = findByProps("hasAny", "hasPermission");
         if (hasAnyMod) {
             ["hasAny","hasPermission","has"].forEach(fn => {
@@ -718,60 +693,42 @@
         }
     }
 
-    // ─── Патч нативного "Редактировать участника" (фейк-сохранение ролей) ──────
-    //
-    // Discord на скрине "Редактировать baQup" вызывает editGuildMember / updateMember
-    // через GuildMemberActions когда нажимаешь "Сохранить".
-    // Мы перехватываем этот вызов и сохраняем роли локально вместо API.
-    //
     function patchNativeRoleEdit() {
-        // Ищем функцию которую Discord вызывает при сохранении участника
         const GuildMemberActions = findByProps("editGuildMember") ||
                                    findByProps("updateMember") ||
                                    findByProps("setMemberRoles");
 
         if (GuildMemberActions) {
-            const fnName = GuildMemberActions.editGuildMember   ? "editGuildMember"
-                         : GuildMemberActions.updateMember       ? "updateMember"
-                         : GuildMemberActions.setMemberRoles     ? "setMemberRoles"
-                         : null;
-            if (fnName) {
-                patches.push(instead(fnName, GuildMemberActions, (args, orig) => {
-                    try {
-                        // args: (guildId, userId, { roles, nick, ... })  OR  (guildId, userId, roleIds)
-                        const guildId = args[0];
-                        const userId  = args[1];
-                        const data    = args[2];
+            const fnName = GuildMemberActions.editGuildMember ? "editGuildMember"
+                         : GuildMemberActions.updateMember ? "updateMember"
+                         : "setMemberRoles";
+            patches.push(instead(fnName, GuildMemberActions, (args, orig) => {
+                try {
+                    const guildId = args[0];
+                    const userId  = args[1];
+                    const data    = args[2];
 
-                        // Если в данных есть поле roles — это смена ролей
-                        const newRoles = Array.isArray(data?.roles) ? data.roles
-                                       : Array.isArray(data) ? data
-                                       : null;
+                    const raw = Array.isArray(data?.roles) ? data.roles
+                              : data instanceof Set ? [...data]
+                              : Array.isArray(data) ? data
+                              : null;
 
-                        if (newRoles && guildId && userId) {
-                            // Сохраняем локально, не шлём на сервер
-                            setFakeRolesForUser(guildId, userId, newRoles);
-                            showToast(`✅ Роли сохранены локально (fake)`);
-                            // Не вызываем orig() — блокируем реальный API вызов
-                            return;
-                        }
-                    } catch (e) {
-                        console.error("[FakeAdmin] patchNativeRoleEdit:", e);
+                    if (raw && guildId && userId) {
+                        const ids = raw.map(r => typeof r === "string" ? r : r?.id).filter(Boolean);
+                        setFakeRolesForUser(guildId, userId, ids);
+                        showToast("✅ Роли сохранены локально (fake)");
+                        return Promise.resolve();
                     }
-                    // Если это не смена ролей — пропускаем дальше
-                    return orig(...args);
-                }));
-                console.log(`[FakeAdmin] Patched ${fnName}`);
-            }
+                } catch {}
+                return orig(...args);
+            }));
         }
 
-        // Дополнительно патчим REST запросы через HTTP если нашли прямой API клиент
         const APIModule = findByProps("patch", "put") || findByProps("makeRequest");
         if (APIModule?.patch) {
             patches.push(instead("patch", APIModule, (args, orig) => {
                 try {
                     const url = args[0]?.url || args[0];
-                    // /guilds/{id}/members/{id}
                     if (typeof url === "string" && /\/guilds\/\d+\/members\/\d+/.test(url)) {
                         const body = args[0]?.body || args[1];
                         if (body?.roles) {
@@ -810,7 +767,7 @@
                     }));
                 });
                 if (ret?.props) ret.props.children = children;
-            } catch(e) { console.error("[FakeAdmin] profile patch:", e); }
+            } catch {}
             return ret;
         }));
     }
@@ -835,129 +792,6 @@
                 return ret;
             }));
             break;
-        }
-    }
-
-    // ─── Кнопка "Настройки" в шите сервера ────────────────────────────────────
-    //
-    // СТРАТЕГИЯ:
-    //   1. Хуки useGuildProfile* — самый надёжный, если Discord их экспортирует
-    //   2. Патч GuildProfileSheet — deep-walk + эвристика по кнопкам
-    //   3. Долгое нажатие на иконку сервера в сайдбаре (Guild icon) — ГАРАНТИРОВАННО
-    //      работает независимо от версии Discord
-    //
-    function patchGuildProfileButtons() {
-
-        // ── 1. Хуки ──────────────────────────────────────────────────────────
-        const hookNames = [
-            "useGuildProfileSheetSections", "useGuildProfileSheetActions",
-            "useGuildHeaderActions", "useGuildHeaderButtons",
-            "useGuildContextMenuItems", "useServerContextMenuItems",
-        ];
-        for (const hookName of hookNames) {
-            const mod = findByProps(hookName);
-            if (!mod || typeof mod[hookName] !== "function") continue;
-            patches.push(after(hookName, mod, (args, ret) => {
-                try {
-                    const guildId = args?.[0]?.guildId || args?.[0] || getGuildId();
-                    const btn = { label: "Настройки", icon: "⚙️", onPress: () => openSettings(guildId) };
-                    if (Array.isArray(ret)) return [...ret, btn];
-                    if (ret && typeof ret === "object") {
-                        for (const k of Object.keys(ret)) {
-                            if (Array.isArray(ret[k])) { ret[k] = [...ret[k], btn]; break; }
-                        }
-                    }
-                } catch(e) { console.error("[FakeAdmin] hook:", hookName, e); }
-                return ret;
-            }));
-        }
-
-        // ── 2. GuildProfileSheet deep-walk ────────────────────────────────────
-        const sheetCandidates = [
-            findByName("GuildProfileSheet"),
-            findByProps("GuildProfileSheet")?.GuildProfileSheet,
-            findByProps("GuildProfileSheet")?.default,
-        ].filter(Boolean);
-
-        for (const target of sheetCandidates) {
-            const key = typeof target === "function" ? "__self" :
-                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
-            const pObj = key === "__self" ? { __self: target } : target;
-            const pKey = key === "__self" ? "__self" : key;
-            if (!pObj[pKey]) continue;
-
-            patches.push(after(pKey, pObj, (args, ret) => {
-                try {
-                    const guildId = args?.[0]?.guildId || getGuildId();
-                    injectIntoButtonRow(ret, guildId);
-                } catch(e) { console.error("[FakeAdmin] sheet patch:", e); }
-                return ret;
-            }));
-        }
-
-        // ── 3. Долгое нажатие на иконку сервера в сайдбаре ───────────────────
-        // Discord рендерит Guild иконки через GuildItem / GuildIcon компоненты.
-        // Патчим onLongPress чтобы открывать наш модал.
-        // Это 100% рабочий fallback — долгое нажатие на иконку сервера.
-        const guildItemCandidates = [
-            findByName("GuildItem"),
-            findByProps("GuildItem")?.GuildItem,
-            findByProps("GuildItem")?.default,
-            findByName("GuildIcon"),
-            findByProps("GuildIcon")?.GuildIcon,
-        ].filter(Boolean);
-
-        for (const target of guildItemCandidates) {
-            const key = typeof target === "function" ? "__self" :
-                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
-            const pObj = key === "__self" ? { __self: target } : target;
-            const pKey = key === "__self" ? "__self" : key;
-            if (!pObj[pKey]) continue;
-
-            patches.push(after(pKey, pObj, (args, ret) => {
-                try {
-                    const guildId = args?.[0]?.guildId || args?.[0]?.guild?.id;
-                    if (!guildId || !ret?.props) return ret;
-
-                    const origLong = ret.props.onLongPress;
-                    ret.props.onLongPress = () => {
-                        // Показываем тост с вариантами: оригинальный шит или наши настройки
-                        openSettings(guildId);
-                        if (origLong) origLong();
-                    };
-                } catch {}
-                return ret;
-            }));
-            break; // Берём первый найденный
-        }
-
-        // ── 4. Context menu / action sheet ────────────────────────────────────
-        const actionSheetNames = [
-            "GuildContextMenu", "ServerActionSheet", "NativeGuildContextMenu",
-        ];
-        for (const name of actionSheetNames) {
-            const target = findByName(name) || findByProps(name)?.[name] || findByProps(name)?.default;
-            if (!target) continue;
-            const key = typeof target === "function" ? "__self" :
-                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
-            const pObj = key === "__self" ? { __self: target } : target;
-            const pKey = key === "__self" ? "__self" : key;
-            if (!pObj[pKey]) continue;
-
-            patches.push(after(pKey, pObj, (args, ret) => {
-                try {
-                    const guildId = args?.[0]?.guildId || getGuildId();
-                    const row = React.createElement(Forms.FormRow, {
-                        key: "__fa_settings_row",
-                        label: "⚙️  Фейк настройки сервера",
-                        onPress: () => openSettings(guildId),
-                    });
-                    const ch = ret?.props?.children;
-                    if (Array.isArray(ch)) ch.push(row);
-                    else if (ret?.props) ret.props.children = [ch, row].filter(Boolean);
-                } catch(e) { console.error("[FakeAdmin] action sheet:", name, e); }
-                return ret;
-            }));
         }
     }
 
@@ -993,75 +827,87 @@
         return false;
     }
 
-    // ─── Settings UI ───────────────────────────────────────────────────────────
-
-    function Settings() {
-        const [enabled, setEnabled] = React.useState(storage.enabled);
-        const [toast,   setToast  ] = React.useState(storage.showFakeToast);
-        const [tick,    setTick   ] = React.useState(0);
-
-        function resetFakeRoles() {
-            storage.fakeRoles = {};
-            setTick(t => t+1);
-            showToast("🗑️ Все фейк-роли сброшены");
+    function patchGuildProfileButtons() {
+        const hookNames = [
+            "useGuildProfileSheetSections", "useGuildProfileSheetActions",
+            "useGuildHeaderActions", "useGuildHeaderButtons",
+            "useGuildContextMenuItems", "useServerContextMenuItems",
+        ];
+        for (const hookName of hookNames) {
+            const mod = findByProps(hookName);
+            if (!mod || typeof mod[hookName] !== "function") continue;
+            patches.push(after(hookName, mod, (args, ret) => {
+                try {
+                    const guildId = args?.[0]?.guildId || args?.[0] || getGuildId();
+                    const btn = { label: "Настройки", icon: "⚙️", onPress: () => openSettings(guildId) };
+                    if (Array.isArray(ret)) return [...ret, btn];
+                    if (ret && typeof ret === "object") {
+                        for (const k of Object.keys(ret)) {
+                            if (Array.isArray(ret[k])) { ret[k] = [...ret[k], btn]; break; }
+                        }
+                    }
+                } catch {}
+                return ret;
+            }));
         }
 
-        const totalFakeRoles = Object.values(storage.fakeRoles || {})
-            .flatMap(g => Object.values(g))
-            .reduce((acc, arr) => acc + arr.length, 0);
+        const sheetCandidates = [
+            findByName("GuildProfileSheet"),
+            findByProps("GuildProfileSheet")?.GuildProfileSheet,
+            findByProps("GuildProfileSheet")?.default,
+        ].filter(Boolean);
 
-        return React.createElement(RN.ScrollView, null,
-            React.createElement(Forms.FormSection, { title: "Fake Admin Panel" },
-                React.createElement(Forms.FormSwitch, {
-                    label: "Включить плагин",
-                    subLabel: "Патчит все проверки прав + добавляет кнопку Настройки",
-                    value: enabled,
-                    onValueChange: v => { setEnabled(v); storage.enabled = v; }
-                }),
-                React.createElement(Forms.FormSwitch, {
-                    label: "Показывать тосты",
-                    value: toast,
-                    onValueChange: v => { setToast(v); storage.showFakeToast = v; }
-                })
-            ),
-            React.createElement(Forms.FormSection, { title: "Фейк-роли" },
-                React.createElement(Forms.FormRow, {
-                    label: "Локально выдано ролей",
-                    subLabel: `${totalFakeRoles} назначений сохранено в storage`,
-                }),
-                React.createElement(Forms.FormRow, {
-                    label: "🗑️ Сбросить все фейк-роли",
-                    subLabel: "Удаляет все локально выданные роли",
-                    onPress: resetFakeRoles,
-                })
-            ),
-            React.createElement(Forms.FormSection, { title: "Как открыть настройки" },
-                React.createElement(Forms.FormRow, {
-                    label: "Долгое нажатие на иконку сервера",
-                    subLabel: "Самый надёжный способ — зажми иконку сервера в сайдбаре",
-                }),
-                React.createElement(Forms.FormRow, {
-                    label: "Кнопка ⚙️ в шите сервера",
-                    subLabel: "Добавляется рядом с Бусты/Пригласить/Уведомления",
-                }),
-                React.createElement(Forms.FormRow, {
-                    label: "⚠️ API вернёт 403",
-                    subLabel: "Discord не даст реально управлять без прав",
-                })
-            )
-        );
+        for (const target of sheetCandidates) {
+            const key = typeof target === "function" ? "__self" :
+                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
+            const pObj = key === "__self" ? { __self: target } : target;
+            const pKey = key === "__self" ? "__self" : key;
+            if (!pObj[pKey]) continue;
+
+            patches.push(after(pKey, pObj, (args, ret) => {
+                try {
+                    const guildId = args?.[0]?.guildId || getGuildId();
+                    injectIntoButtonRow(ret, guildId);
+                } catch {}
+                return ret;
+            }));
+        }
+
+        const actionSheetNames = [
+            "GuildContextMenu", "ServerActionSheet", "NativeGuildContextMenu",
+        ];
+        for (const name of actionSheetNames) {
+            const target = findByName(name) || findByProps(name)?.[name] || findByProps(name)?.default;
+            if (!target) continue;
+            const key = typeof target === "function" ? "__self" :
+                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
+            const pObj = key === "__self" ? { __self: target } : target;
+            const pKey = key === "__self" ? "__self" : key;
+            if (!pObj[pKey]) continue;
+
+            patches.push(after(pKey, pObj, (args, ret) => {
+                try {
+                    const guildId = args?.[0]?.guildId || getGuildId();
+                    const row = React.createElement(Forms.FormRow, {
+                        key: "__fa_settings_row",
+                        label: "⚙️  Фейк настройки сервера",
+                        onPress: () => openSettings(guildId),
+                    });
+                    const ch = ret?.props?.children;
+                    if (Array.isArray(ch)) ch.push(row);
+                    else if (ret?.props) ret.props.children = [ch, row].filter(Boolean);
+                } catch {}
+                return ret;
+            }));
+        }
     }
 
-    // ─── Lifecycle ─────────────────────────────────────────────────────────────
-
     function onLoad() {
-        if (!storage.enabled) return;
         patchAllPermissions();
         patchNativeRoleEdit();
         patchUserProfileSheet();
         patchGuildProfileButtons();
         injectModal();
-        if (storage.showFakeToast) showToast("✅ FakeAdmin загружен");
     }
 
     function onUnload() {
@@ -1070,5 +916,5 @@
         modalState.show = null;
     }
 
-    return { onLoad, onUnload, settings: Settings };
+    return { onLoad, onUnload };
 })();
