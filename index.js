@@ -3,7 +3,7 @@
 
     const { React, ReactNative: RN } = vendetta.metro.common;
     const { findByProps, findByName, findByStoreName } = vendetta.metro;
-    const { after, instead, before } = vendetta.patcher;
+    const { after, instead } = vendetta.patcher;
     const { showToast } = vendetta.ui.toasts;
     const { Forms } = vendetta.ui.components;
 
@@ -22,7 +22,7 @@
     const MANAGE_MESSAGES     = 0x2000n;
     const MANAGE_ROLES        = 0x10000000n;
     const MANAGE_WEBHOOKS     = 0x20000000n;
-    const MODERATE_MEMBERS    = 0x10000000000n; // исправлен дубликат
+    const MODERATE_MEMBERS    = 0x10000000000n;
     const VIEW_AUDIT_LOG      = 0x80n;
     const VIEW_GUILD_INSIGHTS = 0x80000n;
     const MANAGE_NICKNAMES    = 0x8000000n;
@@ -39,13 +39,11 @@
 
     const ALL_PERMS_BIGINT = ALL_ADMIN_PERMS.reduce((acc, p) => acc | p, 0n);
 
-    // Безопасное объединение — возвращает тот же тип что на входе
     function mergePerms(original) {
         try {
-            const combined = (BigInt(original || 0) | ALL_PERMS_BIGINT);
+            const combined = BigInt(original || 0) | ALL_PERMS_BIGINT;
             if (typeof original === "bigint") return combined;
             if (typeof original === "string") return combined.toString();
-            // number — безопасно только если влезает; иначе строка
             const asNum = Number(combined);
             return Number.isSafeInteger(asNum) ? asNum : combined.toString();
         } catch { return original; }
@@ -64,7 +62,7 @@
     function getMembers(guildId) {
         try {
             const MemberStore = findByProps("getMembers", "getMember");
-            const UserStore = findByProps("getUser", "getCurrentUser");
+            const UserStore   = findByProps("getUser", "getCurrentUser");
             return (MemberStore?.getMembers?.(guildId) || []).map(m => {
                 const user = UserStore?.getUser?.(m.userId) || {};
                 return { ...m, username: user.username || m.userId };
@@ -92,49 +90,51 @@
 
     // ─── Styles ────────────────────────────────────────────────────────────────
     const S = {
-        screen: { flex: 1, backgroundColor: "#111214" },
-        header: { flexDirection: "row", alignItems: "center", backgroundColor: "#1e1f22", padding: 16, paddingTop: 48, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
-        headerTitle: { color: "#fff", fontSize: 18, fontWeight: "700", flex: 1, textAlign: "center" },
-        backBtn: { color: "#5865f2", fontSize: 16, fontWeight: "600", minWidth: 60 },
-        closeBtn: { color: "#b5bac1", fontSize: 22, minWidth: 40, textAlign: "right" },
-        section: { marginTop: 20, marginHorizontal: 16, marginBottom: 4 },
-        sectionLabel: { color: "#b5bac1", fontSize: 11, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4 },
-        card: { backgroundColor: "#1e1f22", borderRadius: 8, marginHorizontal: 16, overflow: "hidden" },
-        row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
-        rowLast: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14 },
-        rowLabel: { color: "#dbdee1", fontSize: 16, flex: 1 },
-        rowIcon: { fontSize: 20, marginRight: 14 },
-        rowArrow: { color: "#b5bac1", fontSize: 18 },
-        badge: { backgroundColor: "#5865f2", borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginLeft: 8 },
-        badgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-        avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center", marginRight: 12 },
-        avatarText: { color: "#fff", fontSize: 14, fontWeight: "700" },
-        memberName: { color: "#dbdee1", fontSize: 15, fontWeight: "600" },
-        memberSub: { color: "#b5bac1", fontSize: 12, marginTop: 1 },
-        roleDot: { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
-        roleName: { color: "#dbdee1", fontSize: 15, flex: 1 },
-        roleMeta: { color: "#b5bac1", fontSize: 12 },
+        screen:        { flex: 1, backgroundColor: "#111214" },
+        header:        { flexDirection: "row", alignItems: "center", backgroundColor: "#1e1f22", padding: 16, paddingTop: 48, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
+        headerTitle:   { color: "#fff", fontSize: 18, fontWeight: "700", flex: 1, textAlign: "center" },
+        backBtn:       { color: "#5865f2", fontSize: 16, fontWeight: "600", minWidth: 60 },
+        closeBtn:      { color: "#b5bac1", fontSize: 22, minWidth: 40, textAlign: "right" },
+        section:       { marginTop: 20, marginHorizontal: 16, marginBottom: 4 },
+        sectionLabel:  { color: "#b5bac1", fontSize: 11, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4 },
+        card:          { backgroundColor: "#1e1f22", borderRadius: 8, marginHorizontal: 16, overflow: "hidden" },
+        row:           { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
+        rowLast:       { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14 },
+        rowLabel:      { color: "#dbdee1", fontSize: 16, flex: 1 },
+        rowIcon:       { fontSize: 20, marginRight: 14 },
+        rowArrow:      { color: "#b5bac1", fontSize: 18 },
+        badge:         { backgroundColor: "#5865f2", borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginLeft: 8 },
+        badgeText:     { color: "#fff", fontSize: 11, fontWeight: "700" },
+        avatar:        { width: 36, height: 36, borderRadius: 18, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center", marginRight: 12 },
+        avatarText:    { color: "#fff", fontSize: 14, fontWeight: "700" },
+        memberName:    { color: "#dbdee1", fontSize: 15, fontWeight: "600" },
+        memberSub:     { color: "#b5bac1", fontSize: 12, marginTop: 1 },
+        roleDot:       { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
+        roleName:      { color: "#dbdee1", fontSize: 15, flex: 1 },
+        roleMeta:      { color: "#b5bac1", fontSize: 12 },
         serverIconBox: { width: 72, height: 72, borderRadius: 18, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center" },
-        serverIconText: { color: "#fff", fontSize: 26, fontWeight: "700" },
-        overviewName: { color: "#fff", fontSize: 20, fontWeight: "700" },
-        overviewSub: { color: "#b5bac1", fontSize: 13, marginTop: 2 },
-        statsRow: { flexDirection: "row", marginTop: 16, gap: 10 },
-        statBox: { flex: 1, backgroundColor: "#1e1f22", borderRadius: 8, padding: 12, alignItems: "center" },
-        statNum: { color: "#fff", fontSize: 22, fontWeight: "700" },
-        statLabel: { color: "#b5bac1", fontSize: 11, marginTop: 2 },
-        emptyText: { color: "#b5bac1", textAlign: "center", marginTop: 40, fontSize: 15 },
-        searchBox: { backgroundColor: "#1e1f22", borderRadius: 8, marginHorizontal: 16, marginVertical: 8, paddingHorizontal: 14, paddingVertical: 10, color: "#dbdee1", fontSize: 15, borderWidth: 1, borderColor: "#2b2d31" },
-        fakeTag: { backgroundColor: "#ed4245", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 6 },
-        fakeTagText: { color: "#fff", fontSize: 9, fontWeight: "700" },
-        auditRow: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
-        auditAction: { color: "#dbdee1", fontSize: 14, fontWeight: "600" },
-        auditMeta: { color: "#b5bac1", fontSize: 12, marginTop: 2 },
-        warnBox: { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginTop: 10, backgroundColor: "#2b2d31", borderRadius: 6, padding: 10 },
-        warnText: { color: "#faa61a", fontSize: 12, flex: 1, marginLeft: 6 },
-        lockBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+        serverIconText:{ color: "#fff", fontSize: 26, fontWeight: "700" },
+        overviewName:  { color: "#fff", fontSize: 20, fontWeight: "700" },
+        overviewSub:   { color: "#b5bac1", fontSize: 13, marginTop: 2 },
+        statsRow:      { flexDirection: "row", marginTop: 16, gap: 10 },
+        statBox:       { flex: 1, backgroundColor: "#1e1f22", borderRadius: 8, padding: 12, alignItems: "center" },
+        statNum:       { color: "#fff", fontSize: 22, fontWeight: "700" },
+        statLabel:     { color: "#b5bac1", fontSize: 11, marginTop: 2 },
+        emptyText:     { color: "#b5bac1", textAlign: "center", marginTop: 40, fontSize: 15 },
+        searchBox:     { backgroundColor: "#1e1f22", borderRadius: 8, marginHorizontal: 16, marginVertical: 8, paddingHorizontal: 14, paddingVertical: 10, color: "#dbdee1", fontSize: 15, borderWidth: 1, borderColor: "#2b2d31" },
+        fakeTag:       { backgroundColor: "#ed4245", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginLeft: 6 },
+        fakeTagText:   { color: "#fff", fontSize: 9, fontWeight: "700" },
+        auditRow:      { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#2b2d31" },
+        auditAction:   { color: "#dbdee1", fontSize: 14, fontWeight: "600" },
+        auditMeta:     { color: "#b5bac1", fontSize: 12, marginTop: 2 },
+        warnBox:       { flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginTop: 10, backgroundColor: "#2b2d31", borderRadius: 6, padding: 10 },
+        warnText:      { color: "#faa61a", fontSize: 12, flex: 1, marginLeft: 6 },
+        lockBox:       { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+        gearBtn:       { width: 44, height: 44, borderRadius: 22, backgroundColor: "#5865f2", alignItems: "center", justifyContent: "center", marginRight: 12 },
+        gearBtnText:   { fontSize: 22 },
     };
 
-    // ─── Header component ──────────────────────────────────────────────────────
+    // ─── Header ────────────────────────────────────────────────────────────────
     function Header({ title, onBack, onClose }) {
         return React.createElement(RN.View, { style: S.header },
             onBack
@@ -155,7 +155,7 @@
         const [search, setSearch] = React.useState("");
         const allMembers = React.useMemo(() => getMembers(guildId), [guildId]);
         const allRoles   = React.useMemo(() => getRoles(guildId), [guildId]);
-        const filtered = allMembers.filter(m =>
+        const filtered   = allMembers.filter(m =>
             !search || (m.username||"").toLowerCase().includes(search.toLowerCase())
         );
         return React.createElement(RN.View, { style: S.screen },
@@ -168,7 +168,7 @@
                     keyExtractor: (m,i) => m.userId||String(i),
                     renderItem: ({ item: m }) => {
                         const initials = (m.username||"?").slice(0,2).toUpperCase();
-                        const topRole = m.roles?.length ? allRoles.find(r => m.roles.includes(r.id)) : null;
+                        const topRole  = m.roles?.length ? allRoles.find(r => m.roles.includes(r.id)) : null;
                         return React.createElement(RN.View, { style: { flexDirection:"row",alignItems:"center",paddingHorizontal:16,paddingVertical:10,borderBottomWidth:1,borderBottomColor:"#2b2d31" } },
                             React.createElement(RN.View, { style: [S.avatar, topRole?.color ? { backgroundColor: intToHex(topRole.color) } : {}] },
                                 React.createElement(RN.Text, { style: S.avatarText }, initials)),
@@ -228,12 +228,12 @@
     }
 
     const FAKE_AUDIT = [
-        { icon:"🔨", action:"Пользователь забанен", who:"Модератор", target:"user#0001", time:"Только что" },
-        { icon:"👢", action:"Пользователь кикнут",  who:"Модератор", target:"user#0002", time:"5 мин. назад" },
-        { icon:"⏱️", action:"Выдан тайм-аут 10м",  who:"Модератор", target:"user#0003", time:"20 мин. назад" },
-        { icon:"✏️", action:"Канал изменён",         who:"Администратор", target:"#general", time:"1 час назад" },
-        { icon:"🔑", action:"Роль создана",           who:"Администратор", target:"Muted",    time:"3 часа назад" },
-        { icon:"🗑️", action:"Сообщение удалено",      who:"Модератор", target:"#chat",        time:"Вчера" },
+        { icon:"🔨", action:"Пользователь забанен",  who:"Модератор",     target:"user#0001", time:"Только что" },
+        { icon:"👢", action:"Пользователь кикнут",   who:"Модератор",     target:"user#0002", time:"5 мин. назад" },
+        { icon:"⏱️", action:"Выдан тайм-аут 10м",   who:"Модератор",     target:"user#0003", time:"20 мин. назад" },
+        { icon:"✏️", action:"Канал изменён",          who:"Администратор", target:"#general",  time:"1 час назад" },
+        { icon:"🔑", action:"Роль создана",            who:"Администратор", target:"Muted",     time:"3 часа назад" },
+        { icon:"🗑️", action:"Сообщение удалено",       who:"Модератор",     target:"#chat",     time:"Вчера" },
     ];
 
     function AuditLogScreen({ guildId, onBack }) {
@@ -241,7 +241,7 @@
             React.createElement(Header, { title: "Журнал аудита", onBack }),
             React.createElement(RN.View, { style: S.warnBox },
                 React.createElement(RN.Text, null, "⚠️"),
-                React.createElement(RN.Text, { style: S.warnText }, "Демо-данные. Реальный журнал требует прав администратора на сервере.")
+                React.createElement(RN.Text, { style: S.warnText }, "Демо-данные. Реальный журнал требует прав администратора.")
             ),
             React.createElement(RN.FlatList, {
                 style: { marginTop: 8 },
@@ -317,7 +317,7 @@
         );
     }
 
-    // ─── Main Server Settings UI ───────────────────────────────────────────────
+    // ─── Main FakeServerSettings ───────────────────────────────────────────────
 
     function FakeServerSettings({ guildId, onClose }) {
         const [screen, setScreen] = React.useState(null);
@@ -329,11 +329,11 @@
         if (screen === "audit")   return React.createElement(AuditLogScreen, { guildId, onBack: () => setScreen(null) });
         if (screen)               return React.createElement(StubScreen,     { title: screen, onBack: () => setScreen(null) });
 
-        const guild   = getGuildData(guildId);
-        const name    = guild?.name || "Сервер";
+        const guild    = getGuildData(guildId);
+        const name     = guild?.name || "Сервер";
         const initials = name.split(" ").map(w=>w[0]).filter(Boolean).join("").slice(0,3).toUpperCase();
-        const members = React.useMemo(() => getMembers(guildId), [guildId]);
-        const roles   = React.useMemo(() => getRoles(guildId), [guildId]);
+        const members  = React.useMemo(() => getMembers(guildId), [guildId]);
+        const roles    = React.useMemo(() => getRoles(guildId), [guildId]);
 
         function Row({ icon, label, count, last, onPress }) {
             return React.createElement(RN.TouchableOpacity, { onPress: onPress||(() => setScreen(label)), activeOpacity: 0.65 },
@@ -360,9 +360,9 @@
                 ),
                 React.createElement(RN.View, { style: S.section }, React.createElement(RN.Text, { style: S.sectionLabel }, "Настройки")),
                 React.createElement(RN.View, { style: S.card },
-                    React.createElement(Row, { icon:"ℹ️", label:"Обзор",           onPress: () => setScreen("overview") }),
+                    React.createElement(Row, { icon:"ℹ️",  label:"Обзор",          onPress: () => setScreen("overview") }),
                     React.createElement(Row, { icon:"🛡️", label:"Модерация" }),
-                    React.createElement(Row, { icon:"📋", label:"Журнал аудита",   onPress: () => setScreen("audit") }),
+                    React.createElement(Row, { icon:"📋", label:"Журнал аудита",  onPress: () => setScreen("audit") }),
                     React.createElement(Row, { icon:"📁", label:"Каналы" }),
                     React.createElement(Row, { icon:"🔗", label:"Интеграции" }),
                     React.createElement(Row, { icon:"😀", label:"Emoji" }),
@@ -375,8 +375,8 @@
                 ),
                 React.createElement(RN.View, { style: S.section }, React.createElement(RN.Text, { style: S.sectionLabel }, "Управление пользователями")),
                 React.createElement(RN.View, { style: S.card },
-                    React.createElement(Row, { icon:"👥", label:"Участники", count: members.length||null, onPress: () => setScreen("members") }),
-                    React.createElement(Row, { icon:"🏷️", label:"Роли",      count: roles.length||null,   onPress: () => setScreen("roles") }),
+                    React.createElement(Row, { icon:"👥", label:"Участники",  count: members.length||null, onPress: () => setScreen("members") }),
+                    React.createElement(Row, { icon:"🏷️", label:"Роли",       count: roles.length||null,   onPress: () => setScreen("roles") }),
                     React.createElement(Row, { icon:"🔗", label:"Приглашения" }),
                     React.createElement(Row, { icon:"🔨", label:"Баны", last: true, onPress: () => setScreen("bans") })
                 ),
@@ -390,8 +390,8 @@
     const modalState = { show: null };
 
     function RootModal() {
-        const [visible,  setVisible]  = React.useState(false);
-        const [guildId,  setGuildId]  = React.useState(null);
+        const [visible, setVisible] = React.useState(false);
+        const [guildId, setGuildId] = React.useState(null);
 
         React.useEffect(() => {
             modalState.show = (gid) => { setGuildId(gid); setVisible(true); };
@@ -407,11 +407,32 @@
         }, React.createElement(FakeServerSettings, { guildId, onClose: () => setVisible(false) }));
     }
 
+    // ─── Floating Gear Button ──────────────────────────────────────────────────
+    // Всплывающая шестерёнка поверх профиля сервера — резервный способ открыть панель
+
+    function FloatingGear({ guildId }) {
+        return React.createElement(RN.TouchableOpacity, {
+            style: {
+                position: "absolute", bottom: 24, right: 24, zIndex: 9999,
+                width: 52, height: 52, borderRadius: 26,
+                backgroundColor: "#5865f2",
+                alignItems: "center", justifyContent: "center",
+                shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width:0, height:4 },
+                elevation: 10,
+            },
+            onPress: () => {
+                if (modalState.show) modalState.show(guildId || getGuildId());
+                else showToast("❌ Модал не готов, перезагрузи Discord");
+            },
+            activeOpacity: 0.8,
+        }, React.createElement(RN.Text, { style: { fontSize: 24 } }, "⚙️"));
+    }
+
     // ─── PERMISSION PATCHES ────────────────────────────────────────────────────
 
     function patchAllPermissions() {
 
-        // 1. PermissionStore.can / canWithPartialContext
+        // 1. PermissionStore
         const PermissionStore = findByStoreName?.("PermissionStore") ||
                                 findByProps("can", "getGuildPermissions", "getChannelPermissions");
         if (PermissionStore) {
@@ -426,23 +447,15 @@
                     }));
                 }
             });
-
-            // getGuildPermissions — возвращаем в том же типе что пришло
             if (typeof PermissionStore.getGuildPermissions === "function") {
-                patches.push(after("getGuildPermissions", PermissionStore, (_, ret) => {
-                    return mergePerms(ret);
-                }));
+                patches.push(after("getGuildPermissions", PermissionStore, (_, ret) => mergePerms(ret)));
             }
-
-            // getChannelPermissions — аналогично
             if (typeof PermissionStore.getChannelPermissions === "function") {
-                patches.push(after("getChannelPermissions", PermissionStore, (_, ret) => {
-                    return mergePerms(ret);
-                }));
+                patches.push(after("getChannelPermissions", PermissionStore, (_, ret) => mergePerms(ret)));
             }
         }
 
-        // 2. canKick / canBan / canManageUser и т.д.
+        // 2. canKick / canBan / etc
         const PermUtils = findByProps("canManageUser", "canKick", "canBan") ||
                           findByProps("canKick", "canBan");
         if (PermUtils) {
@@ -453,7 +466,7 @@
             });
         }
 
-        // 3. canManageGuild / isOwner
+        // 3. isOwner / isAdmin
         const GuildPerms = findByProps("canManageGuild", "isOwner") ||
                            findByProps("canManageGuild");
         if (GuildPerms) {
@@ -463,43 +476,38 @@
             });
         }
 
-        // 4. Computed permissions
+        // 4. computePermissions
         const computed = findByProps("getGuildPermissions", "makeEveryonePermissions");
         if (computed) {
             ["makeEveryonePermissions","computePermissions"].forEach(fn => {
                 if (typeof computed[fn] === "function") {
                     patches.push(instead(fn, computed, (args, orig) => {
-                        try {
-                            const result = orig(...args);
-                            return mergePerms(result);
-                        } catch { return ALL_PERMS_BIGINT.toString(); }
+                        try { return mergePerms(orig(...args)); }
+                        catch { return ALL_PERMS_BIGINT.toString(); }
                     }));
                 }
             });
         }
 
-        // 5. getSelfMember — добавляем права в объект участника
+        // 5. getSelfMember
         const MemberStore = findByProps("getSelfMember");
         if (MemberStore?.getSelfMember) {
             patches.push(after("getSelfMember", MemberStore, (_, member) => {
                 if (!member) return member;
-                try {
-                    member.permissions = mergePerms(member.permissions);
-                } catch {}
+                try { member.permissions = mergePerms(member.permissions); } catch {}
                 return member;
             }));
         }
 
-        // 6. hasAny / hasPermission — прямой патч чтобы не падал на BigInt
+        // 6. hasAny / hasPermission — патчим чтобы не падало на BigInt конвертации
         const hasAnyMod = findByProps("hasAny", "hasPermission");
         if (hasAnyMod) {
             ["hasAny","hasPermission","has"].forEach(fn => {
                 if (typeof hasAnyMod[fn] === "function") {
                     patches.push(instead(fn, hasAnyMod, ([perms, flag], orig) => {
                         try {
-                            // Нормализуем оба аргумента в BigInt
                             const p = BigInt(perms || 0);
-                            const f = BigInt(flag || 0);
+                            const f = BigInt(flag  || 0);
                             if (ALL_ADMIN_PERMS.some(ap => f === ap)) return true;
                             return Boolean(p & f);
                         } catch {}
@@ -510,7 +518,7 @@
         }
     }
 
-    // ─── Patch UserProfileSheet ────────────────────────────────────────────────
+    // ─── Patch UserProfileSheet (кнопки модератора) ────────────────────────────
 
     function patchUserProfileSheet() {
         const mod = findByName("UserProfileSheet") ||
@@ -538,7 +546,7 @@
         }));
     }
 
-    // ─── Inject RootModal ──────────────────────────────────────────────────────
+    // ─── Inject RootModal + FloatingGear ──────────────────────────────────────
 
     function injectModal() {
         const candidates = [
@@ -552,14 +560,11 @@
             const key = target.default ? "default" :
                         Object.keys(target).find(k => typeof target[k] === "function");
             if (!key) continue;
-
             patches.push(after(key, target, (_, ret) => {
                 try {
                     const overlay = React.createElement(RootModal, { key: "__fa_modal" });
-                    if (Array.isArray(ret?.props?.children))
-                        ret.props.children.push(overlay);
-                    else if (ret?.props)
-                        ret.props.children = [ret.props.children, overlay].filter(Boolean);
+                    if (Array.isArray(ret?.props?.children)) ret.props.children.push(overlay);
+                    else if (ret?.props) ret.props.children = [ret.props.children, overlay].filter(Boolean);
                 } catch {}
                 return ret;
             }));
@@ -567,44 +572,132 @@
         }
     }
 
-    // ─── Patch ServerActionSheet ───────────────────────────────────────────────
+    // ─── Patch ServerActionSheet — все варианты ────────────────────────────────
 
     function patchServerActionSheet() {
-        const candidates = [
+
+        function makeGearItem(guildId) {
+            return {
+                label:  "⚙️  Фейк настройки сервера",
+                action: () => setTimeout(() => {
+                    if (modalState.show) modalState.show(guildId || getGuildId());
+                    else showToast("❌ Модал не готов, перезагрузи Discord");
+                }, 100),
+            };
+        }
+
+        function makeGearRow(guildId) {
+            return React.createElement(Forms.FormRow, {
+                key: "__fa_btn",
+                label: "⚙️  Фейк настройки сервера",
+                onPress: () => setTimeout(() => {
+                    if (modalState.show) modalState.show(guildId || getGuildId());
+                    else showToast("❌ Модал не готов, перезагрузи Discord");
+                }, 100),
+            });
+        }
+
+        // ── Вариант A: хук возвращает массив items ────────────────────────────
+        const hookCandidates = [
+            findByProps("useGuildContextMenuItems"),
+            findByProps("useServerContextMenuItems"),
+            findByProps("useGuildActionSheetItems"),
+        ].filter(Boolean);
+
+        for (const mod of hookCandidates) {
+            const hookName = ["useGuildContextMenuItems","useServerContextMenuItems","useGuildActionSheetItems"]
+                .find(k => typeof mod[k] === "function");
+            if (!hookName) continue;
+            patches.push(after(hookName, mod, (args, ret) => {
+                try {
+                    const guildId = args?.[0]?.guildId || args?.[0] || getGuildId();
+                    const item = makeGearItem(guildId);
+                    if (Array.isArray(ret)) return [...ret, item];
+                    if (Array.isArray(ret?.items)) { ret.items = [...ret.items, item]; return ret; }
+                } catch(e) { console.error("[FakeAdmin] hook patch:", e); }
+                return ret;
+            }));
+        }
+
+        // ── Вариант B: компонент с JSX children ───────────────────────────────
+        const componentCandidates = [
             findByName("GuildContextMenu"),
             findByProps("GuildContextMenu")?.GuildContextMenu,
             findByName("ServerActionSheet"),
             findByProps("ServerActionSheet")?.default,
-            findByProps("useGuildContextMenuItems"),
+            findByName("NativeGuildContextMenu"),
         ].filter(Boolean);
 
-        for (const target of candidates) {
-            const key = typeof target === "function" ? null :
-                        (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
-            const obj = key ? target : null;
-            const fn  = key ? target[key] : (typeof target === "function" ? target : null);
-            if (!fn) continue;
-
-            const patchTarget = obj || { fn };
-            const patchKey = key || "fn";
+        for (const target of componentCandidates) {
+            const key = typeof target === "function"
+                ? null
+                : (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
+            const patchTarget = key ? target : { __fn: target };
+            const patchKey    = key || "__fn";
 
             patches.push(after(patchKey, patchTarget, (args, ret) => {
                 try {
                     const guildId = args?.[0]?.guildId || getGuildId();
-                    const fakeBtn = React.createElement(Forms.FormRow, {
-                        key: "__fa_btn",
-                        label: "⚙️  Фейк настройки сервера",
-                        onPress: () => {
-                            setTimeout(() => {
+                    const row = makeGearRow(guildId);
+                    const ch  = ret?.props?.children;
+                    if (Array.isArray(ch)) ch.push(row);
+                    else if (ret?.props) ret.props.children = [ch, row].filter(Boolean);
+                } catch(e) { console.error("[FakeAdmin] component patch:", e); }
+                return ret;
+            }));
+        }
+
+        // ── Вариант C: GuildHeader / GuildProfileSheet — добавляем кнопку-шестерёнку ──
+        // Это круглые кнопки рядом с "39 бустов" / "Пригласить" / "Уведомления"
+        const headerCandidates = [
+            findByName("GuildProfileSheet"),
+            findByProps("GuildProfileSheet")?.GuildProfileSheet,
+            findByName("GuildHeader"),
+            findByProps("GuildHeader")?.default,
+            findByProps("useGuildHeaderButtons"),
+        ].filter(Boolean);
+
+        for (const target of headerCandidates) {
+            // Патчим хук кнопок если есть
+            if (target?.useGuildHeaderButtons) {
+                patches.push(after("useGuildHeaderButtons", target, (args, ret) => {
+                    try {
+                        const guildId = args?.[0]?.guildId || getGuildId();
+                        const btn = {
+                            label: "Настройки",
+                            icon:  "⚙️",
+                            onPress: () => {
                                 if (modalState.show) modalState.show(guildId || getGuildId());
-                                else showToast("❌ Модал не готов, перезагрузи Discord");
-                            }, 100);
-                        }
-                    });
-                    const ch = ret?.props?.children;
-                    if (Array.isArray(ch)) ch.push(fakeBtn);
-                    else if (ret?.props) ret.props.children = [ch, fakeBtn].filter(Boolean);
-                } catch(e) { console.error("[FakeAdmin] action sheet patch:", e); }
+                                else showToast("❌ Модал не готов");
+                            },
+                        };
+                        if (Array.isArray(ret)) return [btn, ...ret];
+                    } catch {}
+                    return ret;
+                }));
+                continue;
+            }
+
+            // Патчим render компонента
+            const key = typeof target === "function"
+                ? null
+                : (target.default ? "default" : Object.keys(target).find(k => typeof target[k] === "function"));
+            const patchTarget = key ? target : { __fn: target };
+            const patchKey    = key || "__fn";
+
+            patches.push(after(patchKey, patchTarget, (args, ret) => {
+                try {
+                    const guildId = args?.[0]?.guildId || getGuildId();
+                    const gear = React.createElement(FloatingGear, { key: "__fa_gear", guildId });
+                    // Инжектим как floating overlay внутри sheet
+                    if (ret?.props) {
+                        const wrap = React.createElement(RN.View, { style: { flex:1 }, key: "__fa_wrap" },
+                            ret,
+                            gear
+                        );
+                        return wrap;
+                    }
+                } catch(e) { console.error("[FakeAdmin] header patch:", e); }
                 return ret;
             }));
         }
@@ -636,6 +729,10 @@
                     subLabel: "Для MANAGE_GUILD, BAN, KICK, ADMINISTRATOR и ещё 10 прав"
                 }),
                 React.createElement(Forms.FormRow, {
+                    label: "hasAny/hasPermission пропатчен",
+                    subLabel: "Фикс BigInt→Number краша при открытии профиля сервера"
+                }),
+                React.createElement(Forms.FormRow, {
                     label: "Профиль пользователя",
                     subLabel: "Кнопки Тайм-аут / Выгнать / Забанить добавлены визуально"
                 }),
@@ -655,7 +752,7 @@
         patchUserProfileSheet();
         patchServerActionSheet();
         injectModal();
-        showToast("✅ FakeAdmin: все права пропатчены");
+        if (storage.showFakeToast) showToast("✅ FakeAdmin: все права пропатчены");
     }
 
     function onUnload() {
