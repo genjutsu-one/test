@@ -3,5 +3,5 @@
     "description": "Открывает настройки сервера, роли, участников, аудит и т.д. без прав",
     "authors": [{"name": "ТвойНик", "id": "ТВОЙ_ID"}],
     "main": "index.js",
-    "hash": "d4f7a2b9c1e5d8f3a6b0c2e4f7a9d1b3c5e8f0a2b4c6d8e1f3a5b7c9d2e4f6a8"
+    "hash": "f1cfb5d50dfc8a50133c177a9b6093cc86119d96765a429cdd03f56f7e92a47d"
 }
