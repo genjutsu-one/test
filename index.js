@@ -105,8 +105,13 @@
         storage.fakeRoles[guildId][userId] = roleIds;
     }
 
-    // Фейк-роль с максимальными правами — инжектируется себе
-    const FAKE_OWNER_ROLE_ID = "__fa_owner_role__";
+    // Резервная фейк-роль — ТОЛЬКО если на сервере вообще нет ролей кроме @everyone.
+    // ID сделан в формате снежинки (числовая строка), а не произвольным текстом —
+    // нативный код Discord местами делает BigInt(role.id) / сравнения ID как чисел
+    // (сортировка по position, тай-брейки), и нечисловой ID там может тихо вызывать
+    // исключение, из-за которого конкретная проверка прав фейлится в false,
+    // даже если PermissionStore.can() уже патчен и возвращает true.
+    const FAKE_OWNER_ROLE_ID = "999999999999999999";
     const FAKE_OWNER_ROLE = {
         id: FAKE_OWNER_ROLE_ID,
         name: "Fake Admin",
@@ -115,6 +120,23 @@
         permissions: ALL_PERMS_BIGINT.toString(),
         hoist: false, managed: false,
     };
+
+    // Достаём ID самой крутой РЕАЛЬНОЙ роли на сервере (а не выдумываем новую).
+    // Это надёжнее: у роли уже валидный snowflake, реальное имя/цвет, и она уже
+    // существует в RoleStore — никуда её дополнительно инжектить не надо.
+    // Приоритет: роль с битом ADMINISTRATOR -> просто верхняя по позиции (не @everyone).
+    function getTopRealRoleId(guildId) {
+        try {
+            const roles = getRoles(guildId); // уже отсортированы по position desc
+            const real = roles.filter(r => r.id !== guildId); // @everyone.id === guildId
+            if (!real.length) return null;
+            const withAdmin = real.find(r => {
+                try { return (BigInt(r.permissions || 0) & ADMINISTRATOR) === ADMINISTRATOR; }
+                catch { return false; }
+            });
+            return (withAdmin || real[0]).id;
+        } catch { return null; }
+    }
 
     // ─── Styles ────────────────────────────────────────────────────────────────
     const S = {
@@ -594,28 +616,75 @@
             });
         }
 
-        // 5. getSelfMember — безусловно добавляем фейк-роль
+        // 5. getSelfMember — добавляем себе ID самой крутой РЕАЛЬНОЙ роли сервера.
+        //    Возвращаем НОВЫЙ объект (а не мутируем тот же), потому что часть UI
+        //    в Discord мемоизирует результат по ссылке (reselect-подобные стор-хуки) —
+        //    если просто менять поля у того же объекта, такие хуки могут не
+        //    пересчитаться и продолжат отдавать старые (урезанные) права.
         const MemberStore = findByProps("getSelfMember");
         if (MemberStore?.getSelfMember) {
-            patches.push(after("getSelfMember", MemberStore, (_, member) => {
+            patches.push(after("getSelfMember", MemberStore, ([guildId], member) => {
                 if (!member) return member;
-                try { member.permissions = mergePerms(member.permissions); } catch {}
                 try {
-                    if (!Array.isArray(member.roles)) member.roles = [];
-                    if (!member.roles.includes(FAKE_OWNER_ROLE_ID))
-                        member.roles = [FAKE_OWNER_ROLE_ID, ...member.roles];
-                } catch {}
-                return member;
+                    const topRoleId = getTopRealRoleId(guildId) || FAKE_OWNER_ROLE_ID;
+                    const roles = Array.isArray(member.roles) ? member.roles : [];
+                    const newRoles = roles.includes(topRoleId) ? roles : [topRoleId, ...roles];
+                    const clone = Object.assign(Object.create(Object.getPrototypeOf(member)), member, {
+                        roles: newRoles,
+                        permissions: mergePerms(member.permissions),
+                    });
+                    return clone;
+                } catch { return member; }
             }));
         }
 
-        // 6. getRoles — инжектируем фейк-роль чтобы стор её видел
+        // 5b. getMember(guildId, userId) — то же самое, но только когда спрашивают
+        //     про САМОГО СЕБЯ (чужие участники не трогаются, у них своя логика
+        //     fakeRoles через MembersScreen/RolePickerModal).
+        const MemberStoreSingle = findByProps("getMember", "getMembers");
+        if (MemberStoreSingle?.getMember) {
+            patches.push(after("getMember", MemberStoreSingle, ([guildId, userId], member) => {
+                if (!member) return member;
+                try {
+                    const selfId = getSelfUserId();
+                    if (userId !== selfId) return member;
+                    const topRoleId = getTopRealRoleId(guildId) || FAKE_OWNER_ROLE_ID;
+                    const roles = Array.isArray(member.roles) ? member.roles : [];
+                    const newRoles = roles.includes(topRoleId) ? roles : [topRoleId, ...roles];
+                    return Object.assign(Object.create(Object.getPrototypeOf(member)), member, {
+                        roles: newRoles,
+                        permissions: mergePerms(member.permissions),
+                    });
+                } catch { return member; }
+            }));
+        }
+
+        // 6. getRoles — инжектируем фейк-роль ТОЛЬКО как резерв (если на сервере
+        //    реально нет ни одной роли кроме @everyone — getTopRealRoleId вернёт null).
         const RoleStore = findByProps("getRoles");
         if (RoleStore?.getRoles) {
             patches.push(after("getRoles", RoleStore, ([gId], ret) => {
                 if (!ret) return ret;
-                if (!ret[FAKE_OWNER_ROLE_ID]) ret[FAKE_OWNER_ROLE_ID] = { ...FAKE_OWNER_ROLE };
+                if (!getTopRealRoleId(gId) && !ret[FAKE_OWNER_ROLE_ID]) {
+                    ret[FAKE_OWNER_ROLE_ID] = { ...FAKE_OWNER_ROLE };
+                }
                 return ret;
+            }));
+        }
+
+        // 6b. getGuild/getGuilds — спуфим ownerId на себя. Часть нативных проверок
+        //     (в т.ч., вероятно, гейт на саму иконку "Настройки" в шторке с
+        //     Бустами/Уведомлениями) сравнивает guild.ownerId === currentUser.id
+        //     напрямую, не вызывая никакой патчащейся функции isOwner().
+        const GuildStore = findByProps("getGuild", "getGuilds");
+        if (GuildStore?.getGuild) {
+            patches.push(after("getGuild", GuildStore, (_, guild) => {
+                if (!guild) return guild;
+                try {
+                    const selfId = getSelfUserId();
+                    if (guild.ownerId === selfId) return guild;
+                    return Object.assign(Object.create(Object.getPrototypeOf(guild)), guild, { ownerId: selfId });
+                } catch { return guild; }
             }));
         }
 
