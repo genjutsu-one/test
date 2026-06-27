@@ -10,6 +10,8 @@
     const storage = vendetta.plugin.storage;
     if (typeof storage.enabled === "undefined") storage.enabled = true;
     if (typeof storage.showFakeToast === "undefined") storage.showFakeToast = true;
+    // fakeRoles: { [guildId]: { [userId]: string[] } }
+    if (typeof storage.fakeRoles === "undefined") storage.fakeRoles = {};
 
     let patches = [];
 
@@ -88,6 +90,41 @@
         return "#" + color.toString(16).padStart(6, "0");
     }
 
+    // ─── Fake roles helpers ────────────────────────────────────────────────────
+
+    function getSelfUserId() {
+        try { return findByProps("getUser", "getCurrentUser")?.getCurrentUser?.()?.id || null; } catch { return null; }
+    }
+
+    function getFakeRolesForUser(guildId, userId) {
+        return storage.fakeRoles?.[guildId]?.[userId] || [];
+    }
+
+    function setFakeRolesForUser(guildId, userId, roleIds) {
+        if (!storage.fakeRoles[guildId]) storage.fakeRoles[guildId] = {};
+        storage.fakeRoles[guildId][userId] = roleIds;
+    }
+
+    function getMergedRoles(member, guildId) {
+        const real  = member.roles || [];
+        const fake  = getFakeRolesForUser(guildId, member.userId);
+        const merged = [...new Set([...real, ...fake])];
+        return merged;
+    }
+
+    // Создаём виртуальную «фейк-роль» с максимальными правами для себя
+    // чтобы Discord думал что у нас высшая роль (для отображения кнопки настроек)
+    const FAKE_OWNER_ROLE_ID = "__fa_owner_role__";
+    const FAKE_OWNER_ROLE = {
+        id: FAKE_OWNER_ROLE_ID,
+        name: "Fake Admin",
+        color: 0x5865f2,
+        position: 9999,
+        permissions: ALL_PERMS_BIGINT.toString(),
+        hoist: false,
+        managed: false,
+    };
+
     // ─── Styles ────────────────────────────────────────────────────────────────
     const S = {
         screen:        { flex: 1, backgroundColor: "#111214" },
@@ -153,13 +190,90 @@
 
     // ─── Sub-screens ───────────────────────────────────────────────────────────
 
+    function RolePickerModal({ guildId, member, allRoles, onClose }) {
+        const userId   = member.userId;
+        const [selected, setSelected] = React.useState(
+            () => new Set(getFakeRolesForUser(guildId, userId))
+        );
+
+        function toggle(roleId) {
+            setSelected(prev => {
+                const next = new Set(prev);
+                next.has(roleId) ? next.delete(roleId) : next.add(roleId);
+                return next;
+            });
+        }
+
+        function save() {
+            setFakeRolesForUser(guildId, userId, [...selected]);
+            showToast(`✅ Роли для ${member.username} сохранены (локально)`);
+            onClose();
+        }
+
+        const selfId = getSelfUserId();
+        const isSelf = userId === selfId;
+
+        return React.createElement(RN.Modal, {
+            visible: true,
+            transparent: true,
+            animationType: "slide",
+            onRequestClose: onClose,
+        },
+            React.createElement(RN.View, { style: { flex:1, backgroundColor:"rgba(0,0,0,0.6)", justifyContent:"flex-end" } },
+                React.createElement(RN.View, { style: { backgroundColor:"#1e1f22", borderTopLeftRadius:16, borderTopRightRadius:16, maxHeight:"80%", paddingBottom:32 } },
+                    // header
+                    React.createElement(RN.View, { style: { flexDirection:"row", alignItems:"center", padding:16, borderBottomWidth:1, borderBottomColor:"#2b2d31" } },
+                        React.createElement(RN.Text, { style: { color:"#fff", fontSize:16, fontWeight:"700", flex:1 } },
+                            `Фейк-роли: ${member.username}${isSelf ? " (я)" : ""}`),
+                        React.createElement(RN.TouchableOpacity, { onPress: onClose },
+                            React.createElement(RN.Text, { style: { color:"#b5bac1", fontSize:22 } }, "✕"))
+                    ),
+                    React.createElement(RN.View, { style: { marginHorizontal:12, marginTop:6, backgroundColor:"#2b2d31", borderRadius:6, padding:8 } },
+                        React.createElement(RN.Text, { style: { color:"#faa61a", fontSize:12 } },
+                            "⚠️ Только локально. Реально роли не меняются.")
+                    ),
+                    React.createElement(RN.FlatList, {
+                        style: { marginTop:8 },
+                        data: allRoles,
+                        keyExtractor: r => r.id,
+                        renderItem: ({ item: r }) => {
+                            const active = selected.has(r.id);
+                            return React.createElement(RN.TouchableOpacity, {
+                                onPress: () => toggle(r.id),
+                                activeOpacity: 0.7,
+                                style: { flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingVertical:12,
+                                         borderBottomWidth:1, borderBottomColor:"#2b2d31",
+                                         backgroundColor: active ? "#2b2d31" : "transparent" },
+                            },
+                                React.createElement(RN.View, { style: [S.roleDot, { backgroundColor: intToHex(r.color) }] }),
+                                React.createElement(RN.Text, { style: [S.roleName, active && { color:"#fff" }] }, r.name),
+                                active && React.createElement(RN.Text, { style: { color:"#5865f2", fontSize:18 } }, "✓")
+                            );
+                        }
+                    }),
+                    React.createElement(RN.TouchableOpacity, {
+                        onPress: save,
+                        activeOpacity: 0.8,
+                        style: { marginHorizontal:16, marginTop:12, backgroundColor:"#5865f2", borderRadius:8, paddingVertical:14, alignItems:"center" },
+                    },
+                        React.createElement(RN.Text, { style: { color:"#fff", fontSize:16, fontWeight:"700" } }, "Сохранить")
+                    )
+                )
+            )
+        );
+    }
+
     function MembersScreen({ guildId, onBack }) {
-        const [search, setSearch] = React.useState("");
+        const [search, setSearch]     = React.useState("");
+        const [picker, setPicker]     = React.useState(null); // member object
+        const [tick, setTick]         = React.useState(0);    // force re-render after save
         const allMembers = React.useMemo(() => getMembers(guildId), [guildId]);
         const allRoles   = React.useMemo(() => getRoles(guildId), [guildId]);
+        const selfId     = getSelfUserId();
         const filtered   = allMembers.filter(m =>
             !search || (m.username||"").toLowerCase().includes(search.toLowerCase())
         );
+
         return React.createElement(RN.View, { style: S.screen },
             React.createElement(Header, { title: `Участники (${allMembers.length})`, onBack }),
             React.createElement(RN.TextInput, { style: S.searchBox, placeholder: "Поиск...", placeholderTextColor: "#72767d", value: search, onChangeText: setSearch }),
@@ -167,19 +281,42 @@
                 ? React.createElement(RN.Text, { style: S.emptyText }, "Нет участников")
                 : React.createElement(RN.FlatList, {
                     data: filtered,
+                    extraData: tick,
                     keyExtractor: (m,i) => m.userId||String(i),
                     renderItem: ({ item: m }) => {
-                        const initials = (m.username||"?").slice(0,2).toUpperCase();
-                        const topRole  = m.roles?.length ? allRoles.find(r => m.roles.includes(r.id)) : null;
-                        return React.createElement(RN.View, { style: { flexDirection:"row",alignItems:"center",paddingHorizontal:16,paddingVertical:10,borderBottomWidth:1,borderBottomColor:"#2b2d31" } },
+                        const isSelf      = m.userId === selfId;
+                        const fakeRoleIds = getFakeRolesForUser(guildId, m.userId);
+                        const mergedIds   = [...new Set([...(m.roles||[]), ...fakeRoleIds])];
+                        const topRole     = mergedIds.length ? allRoles.find(r => mergedIds.includes(r.id)) : null;
+                        const hasFake     = fakeRoleIds.length > 0;
+                        const initials    = (m.username||"?").slice(0,2).toUpperCase();
+                        return React.createElement(RN.TouchableOpacity, {
+                            activeOpacity: 0.7,
+                            onPress: () => setPicker(m),
+                            style: { flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingVertical:10, borderBottomWidth:1, borderBottomColor:"#2b2d31" }
+                        },
                             React.createElement(RN.View, { style: [S.avatar, topRole?.color ? { backgroundColor: intToHex(topRole.color) } : {}] },
                                 React.createElement(RN.Text, { style: S.avatarText }, initials)),
                             React.createElement(RN.View, { style: { flex:1 } },
-                                React.createElement(RN.Text, { style: S.memberName }, m.username||m.userId),
-                                React.createElement(RN.Text, { style: S.memberSub }, topRole ? topRole.name : "Нет ролей"))
+                                React.createElement(RN.View, { style: { flexDirection:"row", alignItems:"center" } },
+                                    React.createElement(RN.Text, { style: S.memberName }, m.username||m.userId),
+                                    isSelf && React.createElement(RN.View, { style: [S.fakeTag, { backgroundColor:"#5865f2", marginLeft:6 }] },
+                                        React.createElement(RN.Text, { style: S.fakeTagText }, "ВЫ")),
+                                    hasFake && React.createElement(RN.View, { style: [S.fakeTag, { marginLeft:4 }] },
+                                        React.createElement(RN.Text, { style: S.fakeTagText }, `+${fakeRoleIds.length} fake`))
+                                ),
+                                React.createElement(RN.Text, { style: S.memberSub }, topRole ? topRole.name : "Нет ролей")
+                            ),
+                            React.createElement(RN.Text, { style: { color:"#5865f2", fontSize:13 } }, "🏷️")
                         );
                     }
-                })
+                }),
+            picker && React.createElement(RolePickerModal, {
+                guildId,
+                member: picker,
+                allRoles,
+                onClose: () => { setPicker(null); setTick(t => t+1); }
+            })
         );
     }
 
@@ -483,7 +620,26 @@
             patches.push(after("getSelfMember", MemberStore, (_, member) => {
                 if (!member) return member;
                 try { member.permissions = mergePerms(member.permissions); } catch {}
+                // Безусловно добавляем фейковую роль с макс. правами
+                // чтобы Discord показывал кнопку настроек даже без прав
+                try {
+                    if (!Array.isArray(member.roles)) member.roles = [];
+                    if (!member.roles.includes(FAKE_OWNER_ROLE_ID))
+                        member.roles = [FAKE_OWNER_ROLE_ID, ...member.roles];
+                } catch {}
                 return member;
+            }));
+        }
+
+        // Патчим getRoles чтобы фейк-роль была в сторе и Discord учитывал её permissions
+        const RoleStore = findByProps("getRoles");
+        if (RoleStore?.getRoles) {
+            patches.push(after("getRoles", RoleStore, ([guildId], ret) => {
+                if (!ret) return ret;
+                if (!ret[FAKE_OWNER_ROLE_ID]) {
+                    ret[FAKE_OWNER_ROLE_ID] = { ...FAKE_OWNER_ROLE };
+                }
+                return ret;
             }));
         }
 
@@ -695,6 +851,18 @@
     function Settings() {
         const [enabled, setEnabled] = React.useState(storage.enabled);
         const [toast,   setToast  ] = React.useState(storage.showFakeToast);
+        const [tick,    setTick   ] = React.useState(0);
+
+        function resetFakeRoles() {
+            storage.fakeRoles = {};
+            setTick(t => t+1);
+            showToast("🗑️ Все фейк-роли сброшены");
+        }
+
+        const totalFakeRoles = Object.values(storage.fakeRoles || {})
+            .flatMap(guild => Object.values(guild))
+            .reduce((acc, arr) => acc + arr.length, 0);
+
         return React.createElement(RN.ScrollView, null,
             React.createElement(Forms.FormSection, { title: "Fake Admin Panel" },
                 React.createElement(Forms.FormSwitch, {
@@ -709,9 +877,20 @@
                     onValueChange: v => { setToast(v); storage.showFakeToast = v; }
                 })
             ),
+            React.createElement(Forms.FormSection, { title: "Фейк-роли" },
+                React.createElement(Forms.FormRow, {
+                    label: "Локально выдано ролей",
+                    subLabel: `${totalFakeRoles} назначений сохранено в storage`,
+                }),
+                React.createElement(Forms.FormRow, {
+                    label: "🗑️ Сбросить все фейк-роли",
+                    subLabel: "Удаляет все локально выданные роли",
+                    onPress: resetFakeRoles,
+                })
+            ),
             React.createElement(Forms.FormSection, { title: "Статус" },
                 React.createElement(Forms.FormRow, { label: "Кнопка Настройки", subLabel: "Добавляется в ряд с Бусты/Уведомления" }),
-                React.createElement(Forms.FormRow, { label: "hasAny/hasPermission пропатчен", subLabel: "Фикс BigInt→Number краша" }),
+                React.createElement(Forms.FormRow, { label: "getSelfMember пропатчен", subLabel: "Добавляет фейк-роль с макс. правами (Fake Admin)" }),
                 React.createElement(Forms.FormRow, { label: "⚠️ API вернёт 403", subLabel: "Сервер Discord не даст реально управлять без прав" })
             )
         );
