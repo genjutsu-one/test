@@ -772,57 +772,158 @@
     }
 
     function patchNativeRoleEdit() {
-        const GuildMemberActions = findByProps("editGuildMember") ||
-                                   findByProps("updateMember") ||
-                                   findByProps("setMemberRoles");
+        // --- Action-level intercept (tries every known function name) ---
+        const actionCandidates = [
+            findByProps("editGuildMember"),
+            findByProps("updateMember"),
+            findByProps("setMemberRoles"),
+            findByProps("editMember"),
+            findByProps("patchGuildMember"),
+            findByProps("modifyGuildMember"),
+        ].filter(Boolean);
 
-        if (GuildMemberActions) {
-            const fnName = GuildMemberActions.editGuildMember ? "editGuildMember"
-                         : GuildMemberActions.updateMember ? "updateMember"
-                         : "setMemberRoles";
-            patches.push(instead(fnName, GuildMemberActions, (args, orig) => {
+        for (const mod of actionCandidates) {
+            const fnName = ["editGuildMember","updateMember","setMemberRoles",
+                            "editMember","patchGuildMember","modifyGuildMember"]
+                            .find(n => typeof mod[n] === "function");
+            if (!fnName) continue;
+            patches.push(instead(fnName, mod, (args, orig) => {
                 try {
                     const guildId = args[0];
                     const userId  = args[1];
                     const data    = args[2];
-
                     const raw = Array.isArray(data?.roles) ? data.roles
-                              : data instanceof Set ? [...data]
-                              : Array.isArray(data) ? data
+                              : data instanceof Set        ? [...data]
+                              : Array.isArray(data)       ? data
                               : null;
-
                     if (raw && guildId && userId) {
                         const ids = raw.map(r => typeof r === "string" ? r : r?.id).filter(Boolean);
                         setFakeRolesForUser(guildId, userId, ids);
-                        showToast("✅ Роли сохранены локально (fake)");
-                        return Promise.resolve();
+                        showToast("✅ Роли сохранены локально");
+                        return Promise.resolve({ ok: true });
                     }
                 } catch {}
                 return orig(...args);
             }));
         }
 
-        const APIModule = findByProps("patch", "put") || findByProps("makeRequest");
-        if (APIModule?.patch) {
-            patches.push(instead("patch", APIModule, (args, orig) => {
-                try {
-                    const url = args[0]?.url || args[0];
-                    if (typeof url === "string" && /\/guilds\/\d+\/members\/\d+/.test(url)) {
-                        const body = args[0]?.body || args[1];
-                        if (body?.roles) {
-                            const parts  = url.split("/");
-                            const guildId = parts[parts.indexOf("guilds") + 1];
-                            const userId  = parts[parts.indexOf("members") + 1];
-                            if (guildId && userId) {
-                                setFakeRolesForUser(guildId, userId, body.roles);
-                                showToast("✅ Роли перехвачены и сохранены локально");
-                                return Promise.resolve({ body: {}, ok: true });
+        // --- REST-level intercept: catch the PATCH /guilds/.../members/... call ---
+        // Try every plausible name for Discord's HTTP client.
+        const restCandidates = [
+            findByProps("patch", "put", "get", "post", "del"),
+            findByProps("patch", "get", "post", "put"),
+            findByProps("patch", "put"),
+            findByProps("makeRequest"),
+            findByProps("V6OrEarlierAPIRequest"),
+            findByProps("APIRequest"),
+        ].filter(m => m && typeof m.patch === "function");
+
+        const patchedRestModules = new WeakSet();
+        for (const mod of restCandidates) {
+            if (patchedRestModules.has(mod)) continue;
+            patchedRestModules.add(mod);
+
+            ["patch", "put"].forEach(method => {
+                if (typeof mod[method] !== "function") return;
+                patches.push(instead(method, mod, (args, orig) => {
+                    try {
+                        // Normalise: Discord passes either (url, body) or ({ url, body })
+                        let url  = typeof args[0] === "string" ? args[0] : (args[0]?.url || "");
+                        let body = typeof args[0] === "object"
+                                    ? (args[0]?.body ?? args[0]?.data ?? args[1])
+                                    : args[1];
+
+                        // Match /guilds/<id>/members/<id>
+                        if (/\/guilds\/[^/?#]+\/members\/[^/?#]+/.test(url)) {
+                            const roles = body?.roles ?? (Array.isArray(body) ? body : null);
+                            if (roles) {
+                                const parts   = url.split("/");
+                                const gi      = parts.indexOf("guilds");
+                                const mi      = parts.indexOf("members");
+                                const guildId = gi !== -1 ? parts[gi + 1] : null;
+                                const userId  = mi !== -1 ? parts[mi + 1]?.split("?")[0] : null;
+                                if (guildId && userId) {
+                                    setFakeRolesForUser(guildId, userId,
+                                        Array.isArray(roles) ? roles : []);
+                                    showToast("✅ Роли перехвачены");
+                                    return Promise.resolve({ body: {}, ok: true, status: 200 });
+                                }
                             }
                         }
+                    } catch {}
+                    return orig(...args);
+                }));
+            });
+        }
+    }
+
+    // Patch the "Edit Member" bottom sheet (screen visible in screenshot).
+    // This injects the "Фейк-роли" button directly into that native UI.
+    function patchMemberManageSheet() {
+        const sheetNames = [
+            "GuildMemberEditActionSheet", "GuildMemberEditSheet",
+            "EditGuildMemberSheet",       "MemberManageSheet",
+            "ManageMemberSheet",          "UserManagementSheet",
+            "UserManageSheet",            "GuildMemberActionsSheet",
+            "MemberActionsSheet",         "UserActionsSheet",
+            "GuildMemberSheet",           "GuildUserSheet",
+            "MemberEditSheet",            "EditMemberSheet",
+            "UserEditSheet",
+        ];
+
+        function tryPatchTarget(target) {
+            if (!target) return false;
+            const isFunc = typeof target === "function";
+            const pObj   = isFunc ? { __self: target } : target;
+            const pKey   = isFunc ? "__self"
+                         : (typeof target.default === "function" ? "default"
+                         : Object.keys(target).find(k => typeof target[k] === "function" && k !== "__self"));
+            if (!pKey || !pObj[pKey]) return false;
+
+            patches.push(after(pKey, pObj, (args, ret) => {
+                try {
+                    const p       = args?.[0] || {};
+                    const guildId = p.guildId || p.guild?.id || getGuildId();
+                    const userId  = p.userId  || p.user?.id;
+                    if (!userId || !ret?.props) return ret;
+
+                    const row = makeFakeRolesRow(guildId, userId);
+                    let ch = ret.props.children;
+                    if (!ch) { ret.props.children = [row]; return ret; }
+                    if (!Array.isArray(ch)) ch = [ch];
+                    // Inject right after the Roles section (index 1), before destructive buttons
+                    if (!ch.some(c => c?.key === "__fa_fake_roles_btn")) {
+                        const insertAt = Math.min(2, ch.length);
+                        ch.splice(insertAt, 0, row);
                     }
+                    ret.props.children = ch;
                 } catch {}
-                return orig(...args);
+                return ret;
             }));
+            return true;
+        }
+
+        // 1. Try by component name
+        for (const name of sheetNames) {
+            const mod = findByName(name)
+                     || findByProps(name)?.[name]
+                     || findByProps(name)?.default;
+            if (tryPatchTarget(mod)) break;
+        }
+
+        // 2. Try by unique prop combinations visible in the screenshot
+        const propCombos = [
+            ["onKickPress",          "onBanPress"],
+            ["kickMember",           "banMember"],
+            ["onEditRoles",          "guildId"],
+            ["editRoles",            "userId"],
+            ["transferGuildOwnership","guildId"],
+            ["onTransferOwnership",  "userId"],
+            ["onKick",               "onBan",    "guildId"],
+        ];
+        for (const combo of propCombos) {
+            const mod = findByProps(...combo);
+            if (mod && tryPatchTarget(mod)) break;
         }
     }
 
@@ -1076,6 +1177,7 @@
         patchFluxDispatcher();
         patchAllPermissions();
         patchNativeRoleEdit();
+        patchMemberManageSheet();
         patchUserProfileSheet();
         patchGuildProfileButtons();
         injectModal();
