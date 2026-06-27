@@ -3,21 +3,12 @@
 
     const { React, ReactNative: RN } = vendetta.metro.common;
     const { findByProps, findByName } = vendetta.metro;
-    const { after, before, instead } = vendetta.patcher;
+    const { after, instead } = vendetta.patcher;
     const { showToast } = vendetta.ui.toasts;
     const { Forms } = vendetta.ui.components;
 
     const storage = vendetta.plugin.storage;
     if (typeof storage.fakeRoles === "undefined") storage.fakeRoles = {};
-
-    // Module-level caches keyed by "guildId|userId".
-    const memberCacheMap = new Map();
-    const selfCacheMap   = new Map();
-
-    // Set once in patchFluxDispatcher, used by setFakeRolesForUser to trigger re-renders.
-    let _flux = null;
-    // Guard against our own dispatch triggering the before-patch again.
-    let _applyingFake = false;
 
     let patches = [];
 
@@ -116,25 +107,6 @@
     function setFakeRolesForUser(guildId, userId, roleIds) {
         if (!storage.fakeRoles[guildId]) storage.fakeRoles[guildId] = {};
         storage.fakeRoles[guildId][userId] = roleIds;
-        // Invalidate clone caches so getMember re-builds on next call.
-        memberCacheMap.delete(`${guildId}|${userId}`);
-        selfCacheMap.delete(guildId);
-        // Force Discord's MemberStore to update and re-render all subscribed components.
-        try {
-            if (_flux) {
-                const MS = findByProps("getMember", "getMembers");
-                const realMember = MS?.getMember?.(guildId, userId);
-                if (realMember) {
-                    _applyingFake = true;
-                    _flux.dispatch({
-                        type:    "GUILD_MEMBER_UPDATE",
-                        guildId,
-                        member:  { ...realMember, roles: roleIds, guildId, userId },
-                    });
-                    _applyingFake = false;
-                }
-            }
-        } catch { _applyingFake = false; }
     }
 
     const FAKE_OWNER_ROLE_ID = "999999999999999999";
@@ -222,77 +194,8 @@
         );
     }
 
-    function RolePickerModal({ guildId, member, allRoles, onClose }) {
-        const userId = member.userId;
-        const [selected, setSelected] = React.useState(
-            () => new Set(getFakeRolesForUser(guildId, userId))
-        );
-
-        function toggle(roleId) {
-            setSelected(prev => {
-                const next = new Set(prev);
-                next.has(roleId) ? next.delete(roleId) : next.add(roleId);
-                return next;
-            });
-        }
-
-        function save() {
-            setFakeRolesForUser(guildId, userId, [...selected]);
-            showToast(`✅ Роли для ${member.username} сохранены (локально)`);
-            onClose();
-        }
-
-        const selfId = getSelfUserId();
-        const isSelf = userId === selfId;
-
-        return React.createElement(RN.Modal, {
-            visible: true, transparent: true, animationType: "slide", onRequestClose: onClose,
-        },
-            React.createElement(RN.View, { style: { flex:1, backgroundColor:"rgba(0,0,0,0.6)", justifyContent:"flex-end" } },
-                React.createElement(RN.View, { style: { backgroundColor:"#1e1f22", borderTopLeftRadius:16, borderTopRightRadius:16, maxHeight:"80%", paddingBottom:32 } },
-                    React.createElement(RN.View, { style: { flexDirection:"row", alignItems:"center", padding:16, borderBottomWidth:1, borderBottomColor:"#2b2d31" } },
-                        React.createElement(RN.Text, { style: { color:"#fff", fontSize:16, fontWeight:"700", flex:1 } },
-                            `Фейк-роли: ${member.username}${isSelf ? " (я)" : ""}`),
-                        React.createElement(RN.TouchableOpacity, { onPress: onClose },
-                            React.createElement(RN.Text, { style: { color:"#b5bac1", fontSize:22 } }, "✕"))
-                    ),
-                    React.createElement(RN.View, { style: { marginHorizontal:12, marginTop:6, backgroundColor:"#2b2d31", borderRadius:6, padding:8 } },
-                        React.createElement(RN.Text, { style: { color:"#faa61a", fontSize:12 } },
-                            "⚠️ Только локально. Реально роли не меняются.")
-                    ),
-                    React.createElement(RN.FlatList, {
-                        style: { marginTop:8 },
-                        data: allRoles,
-                        keyExtractor: r => r.id,
-                        renderItem: ({ item: r }) => {
-                            const active = selected.has(r.id);
-                            return React.createElement(RN.TouchableOpacity, {
-                                onPress: () => toggle(r.id), activeOpacity: 0.7,
-                                style: { flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingVertical:12,
-                                         borderBottomWidth:1, borderBottomColor:"#2b2d31",
-                                         backgroundColor: active ? "#2b2d31" : "transparent" },
-                            },
-                                React.createElement(RN.View, { style: [S.roleDot, { backgroundColor: intToHex(r.color) }] }),
-                                React.createElement(RN.Text, { style: [S.roleName, active && { color:"#fff" }] }, r.name),
-                                active && React.createElement(RN.Text, { style: { color:"#5865f2", fontSize:18 } }, "✓")
-                            );
-                        }
-                    }),
-                    React.createElement(RN.TouchableOpacity, {
-                        onPress: save, activeOpacity: 0.8,
-                        style: { marginHorizontal:16, marginTop:12, backgroundColor:"#5865f2", borderRadius:8, paddingVertical:14, alignItems:"center" },
-                    },
-                        React.createElement(RN.Text, { style: { color:"#fff", fontSize:16, fontWeight:"700" } }, "Сохранить")
-                    )
-                )
-            )
-        );
-    }
-
     function MembersScreen({ guildId, onBack }) {
         const [search, setSearch] = React.useState("");
-        const [picker, setPicker] = React.useState(null);
-        const [tick,   setTick  ] = React.useState(0);
         const allMembers = React.useMemo(() => getMembers(guildId), [guildId]);
         const allRoles   = React.useMemo(() => getRoles(guildId), [guildId]);
         const selfId     = getSelfUserId();
@@ -306,7 +209,7 @@
             filtered.length === 0
                 ? React.createElement(RN.Text, { style: S.emptyText }, "Нет участников")
                 : React.createElement(RN.FlatList, {
-                    data: filtered, extraData: tick,
+                    data: filtered,
                     keyExtractor: (m,i) => m.userId||String(i),
                     renderItem: ({ item: m }) => {
                         const isSelf      = m.userId === selfId;
@@ -315,8 +218,7 @@
                         const topRole     = mergedIds.length ? allRoles.find(r => mergedIds.includes(r.id)) : null;
                         const hasFake     = fakeIds.length > 0;
                         const initials    = (m.username||"?").slice(0,2).toUpperCase();
-                        return React.createElement(RN.TouchableOpacity, {
-                            activeOpacity: 0.7, onPress: () => setPicker(m),
+                        return React.createElement(RN.View, {
                             style: { flexDirection:"row", alignItems:"center", paddingHorizontal:16, paddingVertical:10, borderBottomWidth:1, borderBottomColor:"#2b2d31" }
                         },
                             React.createElement(RN.View, { style: [S.avatar, topRole?.color ? { backgroundColor: intToHex(topRole.color) } : {}] },
@@ -330,15 +232,10 @@
                                         React.createElement(RN.Text, { style: S.fakeTagText }, `+${fakeIds.length} fake`))
                                 ),
                                 React.createElement(RN.Text, { style: S.memberSub }, topRole ? topRole.name : "Нет ролей")
-                            ),
-                            React.createElement(RN.Text, { style: { color:"#5865f2", fontSize:13 } }, "🏷️")
+                            )
                         );
                     }
-                }),
-            picker && React.createElement(RolePickerModal, {
-                guildId, member: picker, allRoles,
-                onClose: () => { setPicker(null); setTick(t => t+1); }
-            })
+                })
         );
     }
 
@@ -539,7 +436,6 @@
     }
 
     const modalState = { show: null };
-    const rolePickerModalState = { show: null };
 
     function RootModal() {
         const [visible, setVisible] = React.useState(false);
@@ -553,22 +449,6 @@
             visible: true, animationType: "slide", presentationStyle: "pageSheet",
             onRequestClose: () => setVisible(false)
         }, React.createElement(FakeServerSettings, { guildId, onClose: () => setVisible(false) }));
-    }
-
-    // Standalone floating modal for RolePicker — triggered from UserProfileSheet button.
-    function RolePickerRootModal() {
-        const [ctx, setCtx] = React.useState(null); // { guildId, member, allRoles }
-        React.useEffect(() => {
-            rolePickerModalState.show = (payload) => setCtx(payload);
-            return () => { rolePickerModalState.show = null; };
-        }, []);
-        if (!ctx) return null;
-        return React.createElement(RolePickerModal, {
-            guildId:  ctx.guildId,
-            member:   ctx.member,
-            allRoles: ctx.allRoles,
-            onClose:  () => setCtx(null),
-        });
     }
 
     function openSettings(guildId) {
@@ -640,14 +520,14 @@
             });
         }
 
+        const memberCloneCache = new WeakMap();
         const guildCloneCache  = new WeakMap();
 
         const MemberStore = findByProps("getSelfMember");
         if (MemberStore?.getSelfMember) {
             patches.push(after("getSelfMember", MemberStore, ([guildId], member) => {
                 if (!member) return member;
-                const cacheKey = String(guildId);
-                if (selfCacheMap.has(cacheKey)) return selfCacheMap.get(cacheKey);
+                if (memberCloneCache.has(member)) return memberCloneCache.get(member);
                 try {
                     const userId = member.userId || getSelfUserId();
                     const base = hasFakeOverride(guildId, userId) ? getFakeRolesForUser(guildId, userId) : (member.roles || []);
@@ -657,7 +537,7 @@
                         roles,
                         permissions: mergePerms(member.permissions),
                     });
-                    selfCacheMap.set(cacheKey, clone);
+                    memberCloneCache.set(member, clone);
                     return clone;
                 } catch {
                     return member;
@@ -673,9 +553,7 @@
                 const isSelf = userId === selfId;
                 const override = hasFakeOverride(guildId, userId);
                 if (!isSelf && !override) return member;
-
-                const cacheKey = `${guildId}|${userId}`;
-                if (memberCacheMap.has(cacheKey)) return memberCacheMap.get(cacheKey);
+                if (memberCloneCache.has(member)) return memberCloneCache.get(member);
                 try {
                     let roles = override ? getFakeRolesForUser(guildId, userId) : (Array.isArray(member.roles) ? member.roles : []);
                     if (isSelf) {
@@ -686,7 +564,7 @@
                         roles,
                         permissions: isSelf ? mergePerms(member.permissions) : member.permissions,
                     });
-                    memberCacheMap.set(cacheKey, clone);
+                    memberCloneCache.set(member, clone);
                     return clone;
                 } catch {
                     return member;
@@ -740,303 +618,83 @@
         }
     }
 
-    function patchFluxDispatcher() {
-        const FluxDispatcher =
-            findByProps("_dispatch", "dispatch", "subscribe") ||
-            findByProps("dispatch", "subscribe", "register") ||
-            findByProps("dispatch", "subscribe");
-        if (!FluxDispatcher?.dispatch) return;
-        _flux = FluxDispatcher;
-
-        // Intercept GUILD_MEMBER_UPDATE BEFORE it reaches MemberStore.
-        // When the server sends a real update (WS sync), we replace the real roles
-        // with our fake ones so the store never overwrites what the user set.
-        patches.push(before("dispatch", FluxDispatcher, ([action]) => {
-            try {
-                if (_applyingFake) return; // our own dispatch — don't re-intercept
-                if (action?.type === "GUILD_MEMBER_UPDATE") {
-                    const guildId = action.guildId || action.member?.guildId;
-                    const userId  = action.member?.userId || action.member?.user?.id;
-                    if (guildId && userId && hasFakeOverride(guildId, userId)) {
-                        action.member = {
-                            ...action.member,
-                            roles: getFakeRolesForUser(guildId, userId),
-                        };
-                        // Invalidate clone cache so getMember reads fresh from store.
-                        memberCacheMap.delete(`${guildId}|${userId}`);
-                        selfCacheMap.delete(guildId);
-                    }
-                }
-            } catch {}
-        }));
-    }
-
     function patchNativeRoleEdit() {
-        // --- Action-level intercept (tries every known function name) ---
-        const actionCandidates = [
-            findByProps("editGuildMember"),
-            findByProps("updateMember"),
-            findByProps("setMemberRoles"),
-            findByProps("editMember"),
-            findByProps("patchGuildMember"),
-            findByProps("modifyGuildMember"),
-        ].filter(Boolean);
+        const GuildMemberActions = findByProps("editGuildMember") ||
+                                   findByProps("updateMember") ||
+                                   findByProps("setMemberRoles");
 
-        for (const mod of actionCandidates) {
-            const fnName = ["editGuildMember","updateMember","setMemberRoles",
-                            "editMember","patchGuildMember","modifyGuildMember"]
-                            .find(n => typeof mod[n] === "function");
-            if (!fnName) continue;
-            patches.push(instead(fnName, mod, (args, orig) => {
+        if (GuildMemberActions) {
+            const fnName = GuildMemberActions.editGuildMember ? "editGuildMember"
+                         : GuildMemberActions.updateMember ? "updateMember"
+                         : "setMemberRoles";
+            patches.push(instead(fnName, GuildMemberActions, (args, orig) => {
                 try {
                     const guildId = args[0];
                     const userId  = args[1];
                     const data    = args[2];
+
                     const raw = Array.isArray(data?.roles) ? data.roles
-                              : data instanceof Set        ? [...data]
-                              : Array.isArray(data)       ? data
+                              : data instanceof Set ? [...data]
+                              : Array.isArray(data) ? data
                               : null;
+
                     if (raw && guildId && userId) {
                         const ids = raw.map(r => typeof r === "string" ? r : r?.id).filter(Boolean);
                         setFakeRolesForUser(guildId, userId, ids);
-                        showToast("✅ Роли сохранены локально");
-                        return Promise.resolve({ ok: true });
+                        showToast("✅ Роли сохранены локально (fake)");
+                        return Promise.resolve();
                     }
                 } catch {}
                 return orig(...args);
             }));
         }
 
-        // --- REST-level intercept: catch the PATCH /guilds/.../members/... call ---
-        // Try every plausible name for Discord's HTTP client.
-        const restCandidates = [
-            findByProps("patch", "put", "get", "post", "del"),
-            findByProps("patch", "get", "post", "put"),
-            findByProps("patch", "put"),
-            findByProps("makeRequest"),
-            findByProps("V6OrEarlierAPIRequest"),
-            findByProps("APIRequest"),
-        ].filter(m => m && typeof m.patch === "function");
-
-        const patchedRestModules = new WeakSet();
-        for (const mod of restCandidates) {
-            if (patchedRestModules.has(mod)) continue;
-            patchedRestModules.add(mod);
-
-            ["patch", "put"].forEach(method => {
-                if (typeof mod[method] !== "function") return;
-                patches.push(instead(method, mod, (args, orig) => {
-                    try {
-                        // Normalise: Discord passes either (url, body) or ({ url, body })
-                        let url  = typeof args[0] === "string" ? args[0] : (args[0]?.url || "");
-                        let body = typeof args[0] === "object"
-                                    ? (args[0]?.body ?? args[0]?.data ?? args[1])
-                                    : args[1];
-
-                        // Match /guilds/<id>/members/<id>
-                        if (/\/guilds\/[^/?#]+\/members\/[^/?#]+/.test(url)) {
-                            const roles = body?.roles ?? (Array.isArray(body) ? body : null);
-                            if (roles) {
-                                const parts   = url.split("/");
-                                const gi      = parts.indexOf("guilds");
-                                const mi      = parts.indexOf("members");
-                                const guildId = gi !== -1 ? parts[gi + 1] : null;
-                                const userId  = mi !== -1 ? parts[mi + 1]?.split("?")[0] : null;
-                                if (guildId && userId) {
-                                    setFakeRolesForUser(guildId, userId,
-                                        Array.isArray(roles) ? roles : []);
-                                    showToast("✅ Роли перехвачены");
-                                    return Promise.resolve({ body: {}, ok: true, status: 200 });
-                                }
+        const APIModule = findByProps("patch", "put") || findByProps("makeRequest");
+        if (APIModule?.patch) {
+            patches.push(instead("patch", APIModule, (args, orig) => {
+                try {
+                    const url = args[0]?.url || args[0];
+                    if (typeof url === "string" && /\/guilds\/\d+\/members\/\d+/.test(url)) {
+                        const body = args[0]?.body || args[1];
+                        if (body?.roles) {
+                            const parts  = url.split("/");
+                            const guildId = parts[parts.indexOf("guilds") + 1];
+                            const userId  = parts[parts.indexOf("members") + 1];
+                            if (guildId && userId) {
+                                setFakeRolesForUser(guildId, userId, body.roles);
+                                showToast("✅ Роли перехвачены и сохранены локально");
+                                return Promise.resolve({ body: {}, ok: true });
                             }
                         }
-                    } catch {}
-                    return orig(...args);
-                }));
-            });
-        }
-    }
-
-    // Patch the "Edit Member" bottom sheet (screen visible in screenshot).
-    // This injects the "Фейк-роли" button directly into that native UI.
-    function patchMemberManageSheet() {
-        const sheetNames = [
-            "GuildMemberEditActionSheet", "GuildMemberEditSheet",
-            "EditGuildMemberSheet",       "MemberManageSheet",
-            "ManageMemberSheet",          "UserManagementSheet",
-            "UserManageSheet",            "GuildMemberActionsSheet",
-            "MemberActionsSheet",         "UserActionsSheet",
-            "GuildMemberSheet",           "GuildUserSheet",
-            "MemberEditSheet",            "EditMemberSheet",
-            "UserEditSheet",
-        ];
-
-        function tryPatchTarget(target) {
-            if (!target) return false;
-            const isFunc = typeof target === "function";
-            const pObj   = isFunc ? { __self: target } : target;
-            const pKey   = isFunc ? "__self"
-                         : (typeof target.default === "function" ? "default"
-                         : Object.keys(target).find(k => typeof target[k] === "function" && k !== "__self"));
-            if (!pKey || !pObj[pKey]) return false;
-
-            patches.push(after(pKey, pObj, (args, ret) => {
-                try {
-                    const p       = args?.[0] || {};
-                    const guildId = p.guildId || p.guild?.id || getGuildId();
-                    const userId  = p.userId  || p.user?.id;
-                    if (!userId || !ret?.props) return ret;
-
-                    const row = makeFakeRolesRow(guildId, userId);
-                    let ch = ret.props.children;
-                    if (!ch) { ret.props.children = [row]; return ret; }
-                    if (!Array.isArray(ch)) ch = [ch];
-                    // Inject right after the Roles section (index 1), before destructive buttons
-                    if (!ch.some(c => c?.key === "__fa_fake_roles_btn")) {
-                        const insertAt = Math.min(2, ch.length);
-                        ch.splice(insertAt, 0, row);
                     }
-                    ret.props.children = ch;
                 } catch {}
-                return ret;
+                return orig(...args);
             }));
-            return true;
         }
-
-        // 1. Try by component name
-        for (const name of sheetNames) {
-            const mod = findByName(name)
-                     || findByProps(name)?.[name]
-                     || findByProps(name)?.default;
-            if (tryPatchTarget(mod)) break;
-        }
-
-        // 2. Try by unique prop combinations visible in the screenshot
-        const propCombos = [
-            ["onKickPress",          "onBanPress"],
-            ["kickMember",           "banMember"],
-            ["onEditRoles",          "guildId"],
-            ["editRoles",            "userId"],
-            ["transferGuildOwnership","guildId"],
-            ["onTransferOwnership",  "userId"],
-            ["onKick",               "onBan",    "guildId"],
-        ];
-        for (const combo of propCombos) {
-            const mod = findByProps(...combo);
-            if (mod && tryPatchTarget(mod)) break;
-        }
-    }
-
-    // Helper: build the "Фейк-роли" FormRow for a given guildId + userId.
-    function makeFakeRolesRow(guildId, userId) {
-        return React.createElement(Forms.FormRow, {
-            key:      "__fa_fake_roles_btn",
-            label:    "🎭  Фейк-роли",
-            subLabel: "Локально изменить роли участника",
-            onPress: () => {
-                try {
-                    const MS   = findByProps("getMember", "getMembers");
-                    const US   = findByProps("getUser", "getCurrentUser");
-                    const raw  = MS?.getMember?.(guildId, userId);
-                    const user = US?.getUser?.(userId) || {};
-                    const member = raw
-                        ? { ...raw, username: user.username || raw.userId }
-                        : { userId, username: user.username || userId, roles: [] };
-                    const allRoles = getRoles(guildId);
-                    setTimeout(() => {
-                        if (rolePickerModalState.show) {
-                            rolePickerModalState.show({ guildId, member, allRoles });
-                        } else {
-                            showToast("❌ RolePicker не готов — перезагрузи Discord");
-                        }
-                    }, 80);
-                } catch (e) {
-                    showToast("❌ " + String(e));
-                }
-            },
-        });
     }
 
     function patchUserProfileSheet() {
-        // Strategy A: patch useUserProfileSheetActions hook (most reliable in recent builds).
-        const hookMod = findByProps("useUserProfileSheetActions");
-        if (hookMod?.useUserProfileSheetActions) {
-            patches.push(after("useUserProfileSheetActions", hookMod, (args, ret) => {
-                try {
-                    const guildId = args?.[0]?.guildId || getGuildId();
-                    const userId  = args?.[0]?.userId  || args?.[0]?.user?.id;
-                    if (!userId) return ret;
-                    const row = makeFakeRolesRow(guildId, userId);
-                    if (Array.isArray(ret)) return [...ret, row];
-                    if (ret && typeof ret === "object") {
-                        for (const k of Object.keys(ret)) {
-                            if (Array.isArray(ret[k])) { ret[k] = [...ret[k], row]; break; }
-                        }
-                    }
-                } catch {}
-                return ret;
-            }));
-        }
-
-        // Strategy B: patch the sheet component render by name (works when hook strategy misses).
-        const sheetNames = ["UserProfileSheet", "UserProfileBottomSheet", "UserSheet"];
-        for (const name of sheetNames) {
-            const mod = findByName(name) || findByProps(name)?.[name] || findByProps(name)?.default;
-            if (!mod) continue;
-            const isFunc = typeof mod === "function";
-            const pObj   = isFunc ? { __self: mod } : mod;
-            const pKey   = isFunc ? "__self"
-                         : (typeof mod.default === "function" ? "default"
-                         : Object.keys(mod).find(k => typeof mod[k] === "function"));
-            if (!pKey || !pObj[pKey]) continue;
-            patches.push(after(pKey, pObj, (args, ret) => {
-                try {
-                    const p      = args?.[0] || {};
-                    const guildId = p.guildId || p.guild?.id || getGuildId();
-                    const userId  = p.userId  || p.user?.id;
-                    if (!userId || !ret?.props) return ret;
-                    const row = makeFakeRolesRow(guildId, userId);
-                    let ch = ret.props.children;
-                    if (!ch) { ret.props.children = [row]; return ret; }
-                    if (!Array.isArray(ch)) ch = [ch];
-                    if (!ch.some(c => c?.key === "__fa_fake_roles_btn"))
-                        ch.push(row);
-                    ret.props.children = ch;
-                } catch {}
-                return ret;
-            }));
-            break;
-        }
-
-        // Strategy C: patch UserContextMenu (long-press on user) as reliable fallback.
-        const ctxNames = ["UserContextMenu", "NativeUserContextMenu", "UserLongPressActionSheet"];
-        for (const name of ctxNames) {
-            const mod = findByName(name) || findByProps(name)?.[name] || findByProps(name)?.default;
-            if (!mod) continue;
-            const isFunc = typeof mod === "function";
-            const pObj   = isFunc ? { __self: mod } : mod;
-            const pKey   = isFunc ? "__self"
-                         : (typeof mod.default === "function" ? "default"
-                         : Object.keys(mod).find(k => typeof mod[k] === "function"));
-            if (!pKey || !pObj[pKey]) continue;
-            patches.push(after(pKey, pObj, (args, ret) => {
-                try {
-                    const p       = args?.[0] || {};
-                    const guildId = p.guildId || p.guild?.id || getGuildId();
-                    const userId  = p.userId  || p.user?.id;
-                    if (!userId || !ret?.props) return ret;
-                    const row = makeFakeRolesRow(guildId, userId);
-                    let ch = ret.props.children;
-                    if (!ch) { ret.props.children = [row]; return ret; }
-                    if (!Array.isArray(ch)) ch = [ch];
-                    if (!ch.some(c => c?.key === "__fa_fake_roles_btn"))
-                        ch.push(row);
-                    ret.props.children = ch;
-                } catch {}
-                return ret;
-            }));
-            break;
-        }
+        const mod = findByName("UserProfileSheet") || findByProps("useUserProfileSheetActions");
+        if (!mod) return;
+        patches.push(after("default", mod, (args, ret) => {
+            try {
+                let children = ret?.props?.children || [];
+                if (!Array.isArray(children)) children = [children];
+                [
+                    { label: "⏱️  Тайм-аут", key: "timeout" },
+                    { label: "👢  Выгнать",   key: "kick" },
+                    { label: "🔨  Забанить",  key: "ban" },
+                ].forEach(act => {
+                    children.push(React.createElement(Forms.FormRow, {
+                        key: act.key,
+                        label: act.label,
+                        onPress: () => showToast(`⚠️ ${act.label.trim()} — только визуал, API вернёт 403`)
+                    }));
+                });
+                if (ret?.props) ret.props.children = children;
+            } catch {}
+            return ret;
+        }));
     }
 
     function injectModal() {
@@ -1052,13 +710,9 @@
             if (!key) continue;
             patches.push(after(key, target, (_, ret) => {
                 try {
-                    const overlay     = React.createElement(RootModal,           { key: "__fa_modal" });
-                    const roleOverlay = React.createElement(RolePickerRootModal, { key: "__fa_role_picker_modal" });
-                    if (Array.isArray(ret?.props?.children)) {
-                        ret.props.children.push(overlay, roleOverlay);
-                    } else if (ret?.props) {
-                        ret.props.children = [ret.props.children, overlay, roleOverlay].filter(Boolean);
-                    }
+                    const overlay = React.createElement(RootModal, { key: "__fa_modal" });
+                    if (Array.isArray(ret?.props?.children)) ret.props.children.push(overlay);
+                    else if (ret?.props) ret.props.children = [ret.props.children, overlay].filter(Boolean);
                 } catch {}
                 return ret;
             }));
@@ -1173,11 +827,72 @@
         }
     }
 
+    function getChannelGuildId(channelId) {
+        try {
+            return findByProps("getChannel")?.getChannel?.(channelId)?.guild_id || null;
+        } catch {
+            return null;
+        }
+    }
+
+    function handleGiveRoleCommand(channelId, rawArgs) {
+        const [userId, roleId] = rawArgs;
+        const guildId = getChannelGuildId(channelId) || getGuildId();
+
+        if (!guildId) {
+            showToast("❌ Команда работает только на сервере");
+            return;
+        }
+        if (!userId || !roleId) {
+            showToast("❌ Использование: /giverole <user id> <role id>");
+            return;
+        }
+
+        const role = getRoles(guildId).find(r => r.id === roleId);
+        if (!role) {
+            showToast("❌ Роль с таким ID не найдена на этом сервере");
+            return;
+        }
+
+        const MemberStoreSingle = findByProps("getMember", "getMembers");
+        const realMember = MemberStoreSingle?.getMember?.(guildId, userId);
+        if (!realMember) {
+            showToast("❌ Участник с таким ID не найден");
+            return;
+        }
+
+        const base = hasFakeOverride(guildId, userId)
+            ? getFakeRolesForUser(guildId, userId)
+            : (Array.isArray(realMember.roles) ? realMember.roles : []);
+
+        if (!base.includes(roleId)) {
+            setFakeRolesForUser(guildId, userId, [...base, roleId]);
+        }
+
+        showToast(`✅ Роль "${role.name}" выдана локально, ник перекрасится`);
+    }
+
+    function patchGiveRoleCommand() {
+        const MessageActions = findByProps("sendMessage", "editMessage") || findByProps("sendMessage");
+        if (!MessageActions?.sendMessage) return;
+        patches.push(instead("sendMessage", MessageActions, (args, orig) => {
+            try {
+                const channelId = args[0];
+                const content = (args[1]?.content || "").trim();
+                if (/^\/giverole\b/i.test(content)) {
+                    const rawArgs = content.split(/\s+/).slice(1);
+                    handleGiveRoleCommand(channelId, rawArgs);
+                    return Promise.resolve();
+                }
+            } catch {}
+            return orig(...args);
+        }));
+    }
+
     function onLoad() {
-        patchFluxDispatcher();
         patchAllPermissions();
         patchNativeRoleEdit();
-        patchMemberManageSheet();
+        patchGiveRoleCommand();
         patchUserProfileSheet();
         patchGuildProfileButtons();
         injectModal();
@@ -1187,9 +902,6 @@
         patches.forEach(p => { try { p(); } catch {} });
         patches = [];
         modalState.show = null;
-        rolePickerModalState.show = null;
-        memberCacheMap.clear();
-        selfCacheMap.clear();
     }
 
     return { onLoad, onUnload };
